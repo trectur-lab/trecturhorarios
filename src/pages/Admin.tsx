@@ -434,107 +434,118 @@ const Admin = () => {
                     : "Selecione uma linha"}
                 </CardTitle>
                 {selectedLine && (
-                  <Dialog open={isScheduleDialogOpen} onOpenChange={setIsScheduleDialogOpen}>
-                    <DialogTrigger asChild>
-                      <Button
-                        size="sm"
-                        onClick={() => {
+                  <>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setEditingSchedule(null);
+                        setScheduleForm({
+                          hora: "",
+                          obs: "",
+                          day_type: "uteis",
+                          direction: selectedLine.directions[0] || "",
+                        });
+                        setIsScheduleDialogOpen(true);
+                      }}
+                    >
+                      <Plus className="w-4 h-4 mr-1" />
+                      Novo Horário
+                    </Button>
+                    <Dialog
+                      key={editingSchedule?.id || "new"}
+                      open={isScheduleDialogOpen}
+                      onOpenChange={(open) => {
+                        setIsScheduleDialogOpen(open);
+                        if (!open) {
                           setEditingSchedule(null);
-                          setScheduleForm({
-                            hora: "",
-                            obs: "",
-                            day_type: "uteis",
-                            direction: selectedLine.directions[0] || "",
-                          });
-                        }}
-                      >
-                        <Plus className="w-4 h-4 mr-1" />
-                        Novo Horário
-                      </Button>
-                    </DialogTrigger>
-                    <DialogContent>
-                      <DialogHeader>
-                        <DialogTitle>
-                          {editingSchedule ? "Editar Horário" : "Novo Horário"}
-                        </DialogTitle>
-                        <DialogDescription>
-                          Preencha os dados do horário
-                        </DialogDescription>
-                      </DialogHeader>
-                      <div className="space-y-4">
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label>Horário</Label>
-                            <Input
-                              value={scheduleForm.hora}
-                              onChange={(e) =>
-                                setScheduleForm({ ...scheduleForm, hora: e.target.value })
-                              }
-                              placeholder="08:30"
-                            />
+                          setScheduleForm({ hora: "", obs: "", day_type: "uteis", direction: "" });
+                        }
+                      }}
+                    >
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>
+                            {editingSchedule ? "Editar Horário" : "Novo Horário"}
+                          </DialogTitle>
+                          <DialogDescription>
+                            Preencha os dados do horário
+                          </DialogDescription>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div className="space-y-2">
+                              <Label>Horário</Label>
+                              <Input
+                                value={scheduleForm.hora}
+                                onChange={(e) =>
+                                  setScheduleForm({ ...scheduleForm, hora: e.target.value })
+                                }
+                                placeholder="08:30"
+                              />
+                            </div>
+                            <div className="space-y-2">
+                              <Label>Tipo de Dia</Label>
+                              <Select
+                                value={scheduleForm.day_type}
+                                onValueChange={(v) =>
+                                  setScheduleForm({
+                                    ...scheduleForm,
+                                    day_type: v as "uteis" | "sabados" | "domingos",
+                                  })
+                                }
+                              >
+                                <SelectTrigger>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="uteis">Dias Úteis</SelectItem>
+                                  <SelectItem value="sabados">Sábados</SelectItem>
+                                  <SelectItem value="domingos">Domingos/Feriados</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
                           </div>
                           <div className="space-y-2">
-                            <Label>Tipo de Dia</Label>
+                            <Label>Ponto de Partida</Label>
                             <Select
-                              value={scheduleForm.day_type}
+                              value={scheduleForm.direction}
                               onValueChange={(v) =>
-                                setScheduleForm({
-                                  ...scheduleForm,
-                                  day_type: v as "uteis" | "sabados" | "domingos",
-                                })
+                                setScheduleForm({ ...scheduleForm, direction: v })
                               }
                             >
                               <SelectTrigger>
-                                <SelectValue />
+                                <SelectValue placeholder="Selecione o ponto" />
                               </SelectTrigger>
                               <SelectContent>
-                                <SelectItem value="uteis">Dias Úteis</SelectItem>
-                                <SelectItem value="sabados">Sábados</SelectItem>
-                                <SelectItem value="domingos">Domingos/Feriados</SelectItem>
+                                {selectedLine?.directions.map((d) => (
+                                  <SelectItem key={d} value={d}>
+                                    {d}
+                                  </SelectItem>
+                                ))}
                               </SelectContent>
                             </Select>
                           </div>
+                          <div className="space-y-2">
+                            <Label>Observação VIA (opcional)</Label>
+                            <Input
+                              value={scheduleForm.obs}
+                              onChange={(e) =>
+                                setScheduleForm({ ...scheduleForm, obs: e.target.value })
+                              }
+                              placeholder="Via Vila Resende"
+                            />
+                          </div>
                         </div>
-                        <div className="space-y-2">
-                          <Label>Ponto de Partida</Label>
-                          <Select
-                            value={scheduleForm.direction}
-                            onValueChange={(v) =>
-                              setScheduleForm({ ...scheduleForm, direction: v })
-                            }
+                        <DialogFooter>
+                          <Button
+                            onClick={editingSchedule ? handleUpdateSchedule : handleCreateSchedule}
                           >
-                            <SelectTrigger>
-                              <SelectValue placeholder="Selecione o ponto" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {selectedLine?.directions.map((d) => (
-                                <SelectItem key={d} value={d}>
-                                  {d}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Observação VIA (opcional)</Label>
-                          <Input
-                            value={scheduleForm.obs}
-                            onChange={(e) =>
-                              setScheduleForm({ ...scheduleForm, obs: e.target.value })
-                            }
-                            placeholder="Via Vila Resende"
-                          />
-                        </div>
-                      </div>
-                      <DialogFooter>
-                        <Button
-                          onClick={editingSchedule ? handleUpdateSchedule : handleCreateSchedule}
-                        >
-                          {editingSchedule ? "Salvar" : "Criar"}
-                        </Button>
-                      </DialogFooter>
-                    </DialogContent>
-                  </Dialog>
+                            {editingSchedule ? "Salvar" : "Criar"}
+                          </Button>
+                        </DialogFooter>
+                      </DialogContent>
+                    </Dialog>
+                  </>
                 )}
               </div>
 
