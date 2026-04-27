@@ -37,4 +37,4 @@ jobs:
         username: ${{ secrets.FTP_USERNAME }}
         password: ${{ secrets.FTP_PASSWORD }}
         local-dir: ./dist/ # Pasta que será enviada
-        server-dir: /public_html/ # ⚠️ ATENÇÃO: Mude aqui se o seu site não for ficar na raiz do public_html
+        server-dir: / # ⚠️ ATENÇÃO: Mude aqui se o seu site não for ficar na raiz do public_html
