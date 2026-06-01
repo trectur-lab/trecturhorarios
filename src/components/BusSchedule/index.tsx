@@ -3,6 +3,7 @@ import { Header } from './Header';
 import { Selectors } from './Selectors';
 import { TimeDisplay } from './TimeDisplay';
 import { ScheduleGrid } from './ScheduleGrid';
+import { LineMap } from './LineMap';
 import { useBusSchedulesPublic, ScheduleItem } from '@/hooks/useBusSchedulesPublic';
 import { RefreshCw, Loader2 } from 'lucide-react';
 
@@ -14,7 +15,7 @@ export const BusSchedule = () => {
   const [selectedDirection, setSelectedDirection] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
-  const { lines, schedulesMap, loading } = useBusSchedulesPublic();
+  const { lines, schedulesMap, loading, resolveDayType, isNoService } = useBusSchedulesPublic();
 
   // Set initial selection when lines load
   useEffect(() => {
@@ -34,7 +35,11 @@ export const BusSchedule = () => {
     return () => clearInterval(timer);
   }, []);
 
-  const getDayType = (date: string): DayType => {
+  const getDayType = (date: string, lineId: number | null): DayType => {
+    if (lineId != null) {
+      const overridden = resolveDayType(date, lineId);
+      if (overridden) return overridden;
+    }
     const d = new Date(date + 'T12:00:00');
     const dayOfWeek = d.getDay();
     if (dayOfWeek === 0) return 'domingos';
@@ -48,9 +53,12 @@ export const BusSchedule = () => {
   };
 
   const selectedLinha = lines.find(l => l.id === selectedLine);
-  const dayType = getDayType(selectedDate);
+  const dayType = getDayType(selectedDate, selectedLine);
+  const noService = selectedLine != null && isNoService(selectedDate, selectedLine);
   const lineSchedules = selectedLine ? schedulesMap[selectedLine] : null;
-  const schedule: ScheduleItem[] = lineSchedules?.[dayType]?.[selectedDirection] || [];
+  const schedule: ScheduleItem[] = noService
+    ? []
+    : lineSchedules?.[dayType]?.[selectedDirection] || [];
 
   const getNextBus = (): (ScheduleItem & { index: number }) | null => {
     const now = new Date();
@@ -147,13 +155,30 @@ export const BusSchedule = () => {
 
         {/* Schedule Grid */}
         <section className="animate-fade-in" style={{ animationDelay: '100ms' }}>
-          <ScheduleGrid
+          {noService ? (
+            <div className="bg-destructive/10 border border-destructive/30 text-destructive rounded-2xl p-6 text-center font-medium">
+              Linha não opera nesta data
+            </div>
+          ) : (
+            <ScheduleGrid
             schedule={schedule}
             nextBusIndex={nextBus?.index ?? null}
             dayType={dayType}
             lineColor={selectedLinha?.cor || '#e74c3c'}
-          />
+            />
+          )}
         </section>
+
+        {/* Mapa em tempo real */}
+        {selectedLinha && !noService && (
+          <section className="animate-fade-in" style={{ animationDelay: '150ms' }}>
+            <LineMap
+              numeroLinha={selectedLinha.numero}
+              cor={selectedLinha.cor}
+              mapSentido={selectedDirection}
+            />
+          </section>
+        )}
 
         {/* Footer with Reload Button */}
         <footer className="text-center text-sm text-muted-foreground py-6 space-y-3">

@@ -54,6 +54,9 @@ import {
   Upload,
 } from "lucide-react";
 import { Link } from "react-router-dom";
+import { SondaCredentialsCard } from "@/components/admin/SondaCredentialsCard";
+import { ScheduledChangesCard } from "@/components/admin/ScheduledChangesCard";
+import { SpecialDatesCard } from "@/components/admin/SpecialDatesCard";
 
 const Admin = () => {
   const { isAdmin, userEmail, signOut } = useAuth();
@@ -674,6 +677,12 @@ const Admin = () => {
               )}
             </CardContent>
           </Card>
+        </div>
+
+        <div className="mt-6 grid gap-6">
+          <SondaCredentialsCard />
+          <ScheduledChangesCard />
+          <SpecialDatesCard />
         </div>
       </div>
     </div>
