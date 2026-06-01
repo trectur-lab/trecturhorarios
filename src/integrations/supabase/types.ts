@@ -152,25 +152,37 @@ export type Database = {
       }
       sonda_credentials: {
         Row: {
+          base_url: string | null
           created_at: string
           id: string
+          line_route_path: string | null
+          login_path: string | null
           password: string
           updated_at: string
           username: string
+          vehicle_position_path: string | null
         }
         Insert: {
+          base_url?: string | null
           created_at?: string
           id?: string
+          line_route_path?: string | null
+          login_path?: string | null
           password: string
           updated_at?: string
           username: string
+          vehicle_position_path?: string | null
         }
         Update: {
+          base_url?: string | null
           created_at?: string
           id?: string
+          line_route_path?: string | null
+          login_path?: string | null
           password?: string
           updated_at?: string
           username?: string
+          vehicle_position_path?: string | null
         }
         Relationships: []
       }
