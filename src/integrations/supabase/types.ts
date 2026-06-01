@@ -22,6 +22,8 @@ export type Database = {
           id: number
           nome: string
           numero: string
+          sonda_codigo_veiculo: string | null
+          sonda_id_linha: string | null
           updated_at: string
           via: string | null
         }
@@ -32,6 +34,8 @@ export type Database = {
           id?: number
           nome: string
           numero: string
+          sonda_codigo_veiculo?: string | null
+          sonda_id_linha?: string | null
           updated_at?: string
           via?: string | null
         }
@@ -42,6 +46,8 @@ export type Database = {
           id?: number
           nome?: string
           numero?: string
+          sonda_codigo_veiculo?: string | null
+          sonda_id_linha?: string | null
           updated_at?: string
           via?: string | null
         }
@@ -87,6 +93,152 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      scheduled_schedule_changes: {
+        Row: {
+          applied_at: string | null
+          bus_line_id: number
+          change_type: string
+          created_at: string
+          day_type: string | null
+          direction: string | null
+          id: string
+          new_hora: string | null
+          new_obs: string | null
+          payload: Json | null
+          scheduled_for: string
+          target_hora: string | null
+          updated_at: string
+        }
+        Insert: {
+          applied_at?: string | null
+          bus_line_id: number
+          change_type: string
+          created_at?: string
+          day_type?: string | null
+          direction?: string | null
+          id?: string
+          new_hora?: string | null
+          new_obs?: string | null
+          payload?: Json | null
+          scheduled_for: string
+          target_hora?: string | null
+          updated_at?: string
+        }
+        Update: {
+          applied_at?: string | null
+          bus_line_id?: number
+          change_type?: string
+          created_at?: string
+          day_type?: string | null
+          direction?: string | null
+          id?: string
+          new_hora?: string | null
+          new_obs?: string | null
+          payload?: Json | null
+          scheduled_for?: string
+          target_hora?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scheduled_schedule_changes_bus_line_id_fkey"
+            columns: ["bus_line_id"]
+            isOneToOne: false
+            referencedRelation: "bus_lines"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sonda_credentials: {
+        Row: {
+          created_at: string
+          id: string
+          password: string
+          updated_at: string
+          username: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          password: string
+          updated_at?: string
+          username: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          password?: string
+          updated_at?: string
+          username?: string
+        }
+        Relationships: []
+      }
+      special_date_line_overrides: {
+        Row: {
+          bus_line_id: number
+          created_at: string
+          id: string
+          override: string
+          special_date_id: string
+        }
+        Insert: {
+          bus_line_id: number
+          created_at?: string
+          id?: string
+          override: string
+          special_date_id: string
+        }
+        Update: {
+          bus_line_id?: number
+          created_at?: string
+          id?: string
+          override?: string
+          special_date_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "special_date_line_overrides_bus_line_id_fkey"
+            columns: ["bus_line_id"]
+            isOneToOne: false
+            referencedRelation: "bus_lines"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "special_date_line_overrides_special_date_id_fkey"
+            columns: ["special_date_id"]
+            isOneToOne: false
+            referencedRelation: "special_dates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      special_dates: {
+        Row: {
+          created_at: string
+          date: string
+          default_override: string | null
+          description: string | null
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          date: string
+          default_override?: string | null
+          description?: string | null
+          id?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          date?: string
+          default_override?: string | null
+          description?: string | null
+          id?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       user_roles: {
         Row: {
