@@ -5,10 +5,9 @@ import { z } from 'npm:zod@3'
 const UpsertSchema = z.object({
   username: z.string().min(1).max(255),
   password: z.string().min(1).max(500),
-  base_url: z.string().url().max(500),
-  login_path: z.string().max(255).optional(),
-  vehicle_position_path: z.string().max(255).optional(),
-  line_route_path: z.string().max(255).optional(),
+  auth_url: z.string().url().max(500),
+  position_url: z.string().url().max(500),
+  dashboard_url: z.string().url().max(500).optional(),
 })
 
 Deno.serve(async (req) => {
@@ -55,7 +54,7 @@ Deno.serve(async (req) => {
     if (req.method === 'GET') {
       const { data } = await admin
         .from('sonda_credentials')
-        .select('id, username, base_url, login_path, vehicle_position_path, line_route_path, updated_at')
+        .select('id, username, auth_url, position_url, dashboard_url, updated_at')
         .order('updated_at', { ascending: false })
         .limit(1)
         .maybeSingle()
