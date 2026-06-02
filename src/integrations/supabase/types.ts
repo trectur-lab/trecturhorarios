@@ -152,37 +152,34 @@ export type Database = {
       }
       sonda_credentials: {
         Row: {
-          base_url: string | null
+          auth_url: string
           created_at: string
+          dashboard_url: string
           id: string
-          line_route_path: string | null
-          login_path: string | null
           password: string
+          position_url: string
           updated_at: string
           username: string
-          vehicle_position_path: string | null
         }
         Insert: {
-          base_url?: string | null
+          auth_url?: string
           created_at?: string
+          dashboard_url?: string
           id?: string
-          line_route_path?: string | null
-          login_path?: string | null
           password: string
+          position_url?: string
           updated_at?: string
           username: string
-          vehicle_position_path?: string | null
         }
         Update: {
-          base_url?: string | null
+          auth_url?: string
           created_at?: string
+          dashboard_url?: string
           id?: string
-          line_route_path?: string | null
-          login_path?: string | null
           password?: string
+          position_url?: string
           updated_at?: string
           username?: string
-          vehicle_position_path?: string | null
         }
         Relationships: []
       }
