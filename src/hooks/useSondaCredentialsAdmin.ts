@@ -5,20 +5,18 @@ import { toast } from "sonner";
 export interface SondaCredsView {
   id: string;
   username: string;
-  base_url: string;
-  login_path: string | null;
-  vehicle_position_path: string | null;
-  line_route_path: string | null;
+  auth_url: string;
+  position_url: string;
+  dashboard_url: string | null;
   updated_at: string;
 }
 
 export interface SondaCredsUpsert {
   username: string;
   password: string;
-  base_url: string;
-  login_path?: string;
-  vehicle_position_path?: string;
-  line_route_path?: string;
+  auth_url: string;
+  position_url: string;
+  dashboard_url?: string;
 }
 
 export function useSondaCredentialsAdmin() {
