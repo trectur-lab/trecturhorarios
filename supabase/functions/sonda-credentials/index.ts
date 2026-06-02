@@ -4,7 +4,7 @@ import { z } from 'npm:zod@3'
 
 const UpsertSchema = z.object({
   username: z.string().min(1).max(255),
-  password: z.string().min(1).max(500),
+  password: z.string().max(500).optional(),
   auth_url: z.string().url().max(500),
   position_url: z.string().url().max(500),
   dashboard_url: z.string().url().max(500).optional(),
@@ -71,9 +71,30 @@ Deno.serve(async (req) => {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
       }
+      // Preserve existing password when not provided
+      let passwordToSave = parsed.data.password
+      if (!passwordToSave) {
+        const { data: existing } = await admin
+          .from('sonda_credentials')
+          .select('password')
+          .order('updated_at', { ascending: false })
+          .limit(1)
+          .maybeSingle()
+        if (!existing?.password) {
+          return new Response(JSON.stringify({ error: 'Senha obrigatória na primeira configuração' }), {
+            status: 400,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          })
+        }
+        passwordToSave = existing.password
+      }
       await admin.from('sonda_credentials').delete().neq('id', '00000000-0000-0000-0000-000000000000')
       const { error } = await admin.from('sonda_credentials').insert({
-        ...parsed.data,
+        username: parsed.data.username,
+        password: passwordToSave,
+        auth_url: parsed.data.auth_url,
+        position_url: parsed.data.position_url,
+        dashboard_url: parsed.data.dashboard_url ?? 'https://zn5.sinopticoplus.com/servico-dados/api/v1/obterDashboard',
         updated_at: new Date().toISOString(),
       })
       if (error) throw error
