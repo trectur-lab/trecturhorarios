@@ -1,10 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, Marker, Polyline, Popup, TileLayer } from "react-leaflet";
+import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Maximize2, Minimize2, RefreshCw } from "lucide-react";
 import { useLineVehicles } from "@/hooks/useLineVehicles";
-import { useLineRoute } from "@/hooks/useLineRoute";
 
 interface LineMapProps {
   numeroLinha: string;
@@ -42,7 +41,6 @@ const STATUS_COLOR = {
 } as const;
 
 export const LineMap = ({ numeroLinha, cor, mapSentido }: LineMapProps) => {
-  const { shape } = useLineRoute(numeroLinha);
   const { vehicles, lastFetch, refresh, loading, error } = useLineVehicles(numeroLinha, mapSentido);
   const [fullscreen, setFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -57,9 +55,8 @@ export const LineMap = ({ numeroLinha, cor, mapSentido }: LineMapProps) => {
 
   const center = useMemo<[number, number]>(() => {
     if (vehicles.length > 0) return [vehicles[0].lat, vehicles[0].lng];
-    if (shape.length > 0) return shape[0];
     return [-21.7058, -45.2519]; // Três Corações default
-  }, [vehicles, shape]);
+  }, [vehicles]);
 
   return (
     <div
@@ -81,9 +78,6 @@ export const LineMap = ({ numeroLinha, cor, mapSentido }: LineMapProps) => {
           attribution='&copy; OpenStreetMap'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
-        {shape.length > 1 && (
-          <Polyline positions={shape} pathOptions={{ color: cor, weight: 5, opacity: 0.85 }} />
-        )}
         {vehicles.map((v) => {
           const color = STATUS_COLOR[v.status];
           const icon = v.status === "moving" ? arrowIcon(color, v.bearing || 0) : dotIcon(color);
