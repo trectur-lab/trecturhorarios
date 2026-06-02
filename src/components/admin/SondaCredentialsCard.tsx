@@ -11,10 +11,9 @@ export const SondaCredentialsCard = () => {
   const [form, setForm] = useState({
     username: "",
     password: "",
-    base_url: "",
-    login_path: "/login",
-    vehicle_position_path: "/posicao",
-    line_route_path: "/rota",
+    auth_url: "https://consultaviagem.m2mfrota.com.br/AutenticarUsuario",
+    position_url: "https://zn5.sinopticoplus.com/servico-dados/api/v1/obterPosicaoVeiculo",
+    dashboard_url: "https://zn5.sinopticoplus.com/servico-dados/api/v1/obterDashboard",
   });
 
   useEffect(() => {
@@ -22,10 +21,9 @@ export const SondaCredentialsCard = () => {
       setForm((f) => ({
         ...f,
         username: creds.username,
-        base_url: creds.base_url ?? "",
-        login_path: creds.login_path ?? "/login",
-        vehicle_position_path: creds.vehicle_position_path ?? "/posicao",
-        line_route_path: creds.line_route_path ?? "/rota",
+        auth_url: creds.auth_url ?? "",
+        position_url: creds.position_url ?? "",
+        dashboard_url: creds.dashboard_url ?? "",
       }));
     }
   }, [creds]);
@@ -60,25 +58,19 @@ export const SondaCredentialsCard = () => {
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label>URL Base da API</Label>
-              <Input placeholder="https://api.sondamobility.com.br" value={form.base_url} onChange={(e) => setForm({ ...form, base_url: e.target.value })} />
+              <Label>URL Autenticação (POST)</Label>
+              <Input value={form.auth_url} onChange={(e) => setForm({ ...form, auth_url: e.target.value })} />
             </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div className="space-y-1.5">
-                <Label>Login path</Label>
-                <Input value={form.login_path} onChange={(e) => setForm({ ...form, login_path: e.target.value })} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Posição path</Label>
-                <Input value={form.vehicle_position_path} onChange={(e) => setForm({ ...form, vehicle_position_path: e.target.value })} />
-              </div>
-              <div className="space-y-1.5">
-                <Label>Rota path</Label>
-                <Input value={form.line_route_path} onChange={(e) => setForm({ ...form, line_route_path: e.target.value })} />
-              </div>
+            <div className="space-y-1.5">
+              <Label>URL Posição Veículo (GET)</Label>
+              <Input value={form.position_url} onChange={(e) => setForm({ ...form, position_url: e.target.value })} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>URL Dashboard (GET, opcional)</Label>
+              <Input value={form.dashboard_url} onChange={(e) => setForm({ ...form, dashboard_url: e.target.value })} />
             </div>
             <div className="flex justify-end">
-              <Button onClick={handleSave} disabled={saving || !form.username || (!creds && !form.password) || !form.base_url}>
+              <Button onClick={handleSave} disabled={saving || !form.username || (!creds && !form.password) || !form.auth_url || !form.position_url}>
                 {saving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : null}
                 Salvar
               </Button>
