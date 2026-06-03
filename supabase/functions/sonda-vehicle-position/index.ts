@@ -51,7 +51,9 @@ async function authenticate(creds: any): Promise<string> {
     const parsed = JSON.parse(text)
     if (typeof parsed === 'string') token = parsed
     else if (parsed && typeof parsed === 'object') {
-      token = parsed.token
+      token = parsed.IdentificacaoLogin
+        ?? parsed.identificacaoLogin
+        ?? parsed.token
         ?? parsed.Authorization
         ?? parsed.authorization
         ?? parsed.access_token
