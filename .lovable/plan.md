@@ -1,72 +1,34 @@
-# Correção da integração SONDA Mobility
+## Problema
 
-O PDF mostra que a API real é diferente do que assumimos. Vou ajustar tudo para bater com a especificação correta.
+O mapa aparece corretamente (Leaflet + OpenStreetMap OK), mas **sem nenhum marcador de ônibus**. A edge function `sonda-vehicle-position` autentica com sucesso (200 OK), porém o endpoint `obterPosicaoVeiculo` retorna `total: 0` — ou seja, lista vazia.
 
-## O que muda na API (vs. implementação atual)
+## Plano em duas etapas
 
-| Item | Atual (errado) | Real (PDF) |
+### Etapa 1 — Diagnóstico (modo "debug")
+
+Adicionar à edge function `sonda-vehicle-position` um modo opcional `debug: true` que:
+
+- Loga o status HTTP, headers principais e os primeiros 2 KB do corpo bruto retornado pela SONDA.
+- Devolve no JSON de resposta uma amostra do payload bruto (`rawSample`) e a contagem antes de qualquer filtro.
+
+Em seguida, executar o teste via `curl_edge_functions` com `{"numeroLinha":"01","debug":true}` para inspecionar o que a SONDA está realmente devolvendo. Três cenários possíveis:
+
+| Cenário | Como identificar | Correção |
 |---|---|---|
-| Auth | POST `{base}/login` com headers `X-Username`/`X-Password` | POST `https://consultaviagem.m2mfrota.com.br/AutenticarUsuario` com **body** `{usuario, senha}` |
-| Posição | POST `{base}/posicao` com body `{numeroLinha}` | **GET** `https://zn5.sinopticoplus.com/servico-dados/api/v1/obterPosicaoVeiculo` com header `Authorization: <token>` |
-| Rota (polyline) | POST `{base}/rota` | **Não existe** na API |
-| Resposta | `lat/lng`, `dataHora` ISO | `latitude/longitude`, `linha`, `dataHora` em **epoch ms**, `sentido` ("ida"/"volta"), `trajeto`, `velocidade` |
+| Resposta vem dentro de um campo aninhado | `rawSample` mostra `{"retorno":{...}}` ou `{"dados":[...]}` | Ampliar o parsing em `list = ...` para reconhecer essas chaves |
+| Endpoint exige parâmetros na query | Resposta vazia mesmo com payload válido / mensagem específica nos headers | Adicionar parâmetros corretos (ex.: `idLinha`, `idEmpresa`) à URL |
+| API realmente não tem veículos transmitindo agora | `rawSample` é `[]` literal | Confirmar com o usuário (operação noturna, frota desligada) |
 
-A API retorna **todos os veículos da frota**; é preciso filtrar por `linha === numero da linha`.
+### Etapa 2 — Correção
 
-## Mudanças
+Aplicar o ajuste indicado pelo diagnóstico:
 
-### 1. Banco — `sonda_credentials`
-Migração para substituir os campos de URL:
-- Remover: `base_url`, `login_path`, `vehicle_position_path`, `line_route_path`
-- Adicionar: `auth_url` TEXT, `position_url` TEXT, `dashboard_url` TEXT (opcional, para uso futuro)
+- **Se for aninhamento**: expandir o fallback do parser para cobrir `raw?.retorno?.veiculos`, `raw?.dados`, `raw?.lista`, etc.
+- **Se faltarem parâmetros**: aceitar campos adicionais nas credenciais (`extra_query_params` opcional na tabela `sonda_credentials`) ou ler `bus_lines.sonda_id_linha` e enviar como query param para a SONDA.
+- **Se for ausência real de dados**: deixar mensagem no mapa ("Nenhum veículo transmitindo no momento") e desativar o modo debug.
 
-Pré-preencher via UPDATE com os valores fornecidos.
+Por fim, remover o modo debug ou deixá-lo protegido por um header interno antes de finalizar.
 
-### 2. Edge function `sonda-vehicle-position`
-Reescrever:
-1. Buscar credenciais.
-2. **POST** em `auth_url` com `{"usuario": ..., "senha": ...}` → extrair token (campo `token` ou string raw — tratar ambos).
-3. Cachear token em memória do worker por ~50 min (token JWT) para evitar auth a cada chamada.
-4. **GET** em `position_url` com header `Authorization: <token>`.
-5. Mapear cada veículo:
-   - `lat = latitude`, `lng = longitude`
-   - `dataHora = new Date(dataHora_ms).toISOString()`
-   - `linha`, `sentido`, `trajeto`, `velocidade`, `placa`, `codigo`
-6. Filtrar `linha === numeroLinha` (case-insensitive, sem leading zero mismatch).
-7. Manter filtros existentes: idade máx. 10 min, fora da garagem, status moving/idle/stopped.
-8. Se token expirou (401), limpar cache e tentar uma vez novamente.
+## Pergunta para você
 
-### 3. Edge function `sonda-line-route`
-A API não fornece traçado. Opções:
-- **Escolhida**: remover a função e a feature de polyline. O mapa mostra só os marcadores dos veículos + posição da garagem.
-- Remover `useLineRoute.ts` e qualquer referência em `LineMap.tsx`.
-
-### 4. Edge function `sonda-credentials` + hook admin
-Atualizar para os novos campos (`auth_url`, `position_url`, `dashboard_url`).
-
-### 5. UI `SondaCredentialsCard`
-Trocar os três campos de path por três campos de URL completa:
-- URL Autenticação
-- URL Posição Veículo
-- URL Dashboard (opcional)
-
-Defaults pré-preenchidos com as URLs do PDF.
-
-### 6. Filtro por linha
-Como `linha` na resposta bate com `bus_lines.numero` (ex.: "07"), o campo `sonda_id_linha` deixa de ser necessário para posicionamento. Mantenho a coluna existente (sem alterar schema) como override opcional: se preenchido, usa ele; senão, usa `numero`.
-
-## Arquivos afetados
-
-- **Migração nova**: alterar colunas de `sonda_credentials` + UPDATE com URLs fornecidas
-- `supabase/functions/sonda-vehicle-position/index.ts` — reescrita completa
-- `supabase/functions/sonda-credentials/index.ts` — novos campos
-- `supabase/functions/sonda-line-route/index.ts` — **deletar**
-- `src/hooks/useSondaCredentialsAdmin.ts` — novos campos
-- `src/hooks/useLineRoute.ts` — **deletar**
-- `src/components/admin/SondaCredentialsCard.tsx` — novos inputs
-- `src/components/BusSchedule/LineMap.tsx` — remover uso do `useLineRoute` / polyline
-
-## Observação de segurança
-A senha continua em texto na tabela (acessada só por service_role / edge functions, sem RLS público de SELECT). Sem mudança nesse ponto.
-
-Posso aplicar?
+Você teria como me reenviar (ou colar aqui) o trecho da **documentação da SONDA** que descreve o endpoint `obterPosicaoVeiculo` — especificamente a parte de **parâmetros de requisição** e **formato da resposta de exemplo**? Isso pula direto a Etapa 1 e me deixa corrigir na primeira tentativa. Caso contrário sigo com o diagnóstico via logs.

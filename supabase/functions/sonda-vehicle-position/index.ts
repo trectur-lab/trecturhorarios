@@ -4,6 +4,7 @@ import { z } from 'npm:zod@3'
 
 const BodySchema = z.object({
   numeroLinha: z.string().min(1).max(20),
+  debug: z.boolean().optional(),
 })
 
 const GARAGE = { lat: -21.709497, lng: -45.264057 }
@@ -100,7 +101,7 @@ Deno.serve(async (req) => {
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
     }
-    const { numeroLinha } = parsed.data
+    const { numeroLinha, debug } = parsed.data
 
     const supabase = createClient(
       Deno.env.get('SUPABASE_URL')!,
@@ -133,8 +134,24 @@ Deno.serve(async (req) => {
       const txt = await resp.text().catch(() => '')
       throw new Error(`SONDA posição ${resp.status}: ${txt.slice(0, 200)}`)
     }
-    const raw = await resp.json()
-    const list: any[] = Array.isArray(raw) ? raw : raw?.veiculos ?? raw?.data ?? []
+    const rawText = await resp.text()
+    let raw: any = null
+    try { raw = JSON.parse(rawText) } catch { /* keep null */ }
+    const list: any[] = Array.isArray(raw)
+      ? raw
+      : raw?.veiculos
+        ?? raw?.data
+        ?? raw?.dados
+        ?? raw?.lista
+        ?? raw?.retorno?.veiculos
+        ?? raw?.retorno?.dados
+        ?? raw?.result
+        ?? []
+
+    if (debug) {
+      console.log('SONDA raw response sample:', rawText.slice(0, 2000))
+      console.log('SONDA detected list length:', list.length)
+    }
     const targetLinha = normalizeLinha(numeroLinha)
     const now = Date.now()
     const vehicles = list
@@ -171,7 +188,24 @@ Deno.serve(async (req) => {
       .filter((v) => now - new Date(v.dataHora).getTime() <= MAX_AGE_MS)
       .filter((v) => haversine({ lat: v.lat, lng: v.lng }, GARAGE) > GARAGE_RADIUS_M)
 
-    return new Response(JSON.stringify({ vehicles, fetchedAt: new Date().toISOString(), total: list.length }), {
+    const responseBody: any = {
+      vehicles,
+      fetchedAt: new Date().toISOString(),
+      total: list.length,
+    }
+    if (debug) {
+      responseBody.debug = {
+        httpStatus: resp.status,
+        rawSample: rawText.slice(0, 2000),
+        rawType: Array.isArray(raw) ? 'array' : typeof raw,
+        topLevelKeys: raw && typeof raw === 'object' && !Array.isArray(raw) ? Object.keys(raw) : null,
+        firstItemKeys: list[0] && typeof list[0] === 'object' ? Object.keys(list[0]) : null,
+        firstItemSample: list[0] ?? null,
+        targetLinha: normalizeLinha(numeroLinha),
+        distinctLinhasInResponse: Array.from(new Set(list.map((v: any) => v?.linha).filter(Boolean))).slice(0, 50),
+      }
+    }
+    return new Response(JSON.stringify(responseBody), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     })
   } catch (err) {
