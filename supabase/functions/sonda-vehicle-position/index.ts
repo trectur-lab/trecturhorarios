@@ -82,12 +82,11 @@ async function getToken(creds: any, force = false): Promise<string> {
   return token
 }
 
-async function fetchPositions(creds: any, token: string, headerStyle: 'bearer' | 'raw' | 'x-access-token' = 'bearer'): Promise<Response> {
-  const headers: Record<string, string> = {}
-  if (headerStyle === 'bearer') headers['Authorization'] = `Bearer ${token}`
-  else if (headerStyle === 'raw') headers['Authorization'] = token
-  else headers['x-access-token'] = token
-  return fetch(creds.position_url, { method: 'GET', headers })
+async function fetchPositions(creds: any, token: string): Promise<Response> {
+  return fetch(creds.position_url, {
+    method: 'GET',
+    headers: { Authorization: `Bearer ${token}` },
+  })
 }
 
 function computeStatus(velocidade: number, dataHoraIso: string, prevIdleMap: Map<string, number>, codigo: string) {
@@ -142,33 +141,20 @@ Deno.serve(async (req) => {
       })
     }
 
-    // Get token (cached) and call positions; retry once on 401
-    // Force fresh token every call while debugging
-    let token = await getToken(creds, true)
-    const attempts: Array<{ style: 'bearer' | 'raw' | 'x-access-token'; status: number; sample: string }> = []
-    let resp: Response | null = null
-    let rawText = ''
-    for (const style of ['bearer', 'raw', 'x-access-token'] as const) {
-      const r = await fetchPositions(creds, token, style)
-      const t = await r.text()
-      attempts.push({ style, status: r.status, sample: t.slice(0, 200) })
-      const looksOk = r.ok && !/invalid token|jsonwebtokenerror|tokenexpirederror|authorizationrequired|unauthorized/i.test(t)
-      if (looksOk) {
-        resp = r
-        rawText = t
-        break
-      }
+    // Get token (cached) and call positions; retry once if SONDA reports invalid token
+    let token = await getToken(creds)
+    let resp = await fetchPositions(creds, token)
+    let rawText = await resp.text()
+    const isTokenError = (s: string) =>
+      /invalid token|jsonwebtokenerror|tokenexpirederror|authorizationrequired/i.test(s)
+    if (resp.status === 401 || resp.status === 403 || (resp.ok && isTokenError(rawText))) {
+      token = await getToken(creds, true)
+      resp = await fetchPositions(creds, token)
+      rawText = await resp.text()
     }
-    if (!resp) {
-      return new Response(JSON.stringify({
-        error: 'SONDA rejeitou o token em todas as variantes de header',
-        attempts,
-        authDebug: lastAuthDebug,
-        tokenPreview: token.slice(0, 30) + '…' + token.slice(-10),
-        tokenLength: token.length,
-      }), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
+    if (!resp.ok) {
+      throw new Error(`SONDA posição ${resp.status}: ${rawText.slice(0, 200)}`)
     }
-    // rawText already populated above
     let raw: any = null
     try { raw = JSON.parse(rawText) } catch { /* keep null */ }
     const list: any[] = Array.isArray(raw)
