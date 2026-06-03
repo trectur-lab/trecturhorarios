@@ -26,25 +26,41 @@ function haversine(a: { lat: number; lng: number }, b: { lat: number; lng: numbe
 // In-memory token cache (per edge worker instance)
 let cachedToken: { token: string; fetchedAt: number } | null = null
 
+let lastAuthDebug: any = null
+
 async function authenticate(creds: any): Promise<string> {
   if (!creds?.auth_url) throw new Error('SONDA auth_url não configurado')
+  const payload = { usuario: creds.username, senha: creds.password }
   const resp = await fetch(creds.auth_url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ usuario: creds.username, senha: creds.password }),
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+    body: JSON.stringify(payload),
   })
-  if (!resp.ok) {
-    const txt = await resp.text().catch(() => '')
-    throw new Error(`SONDA auth ${resp.status}: ${txt.slice(0, 200)}`)
-  }
   const text = await resp.text()
+  lastAuthDebug = {
+    status: resp.status,
+    contentType: resp.headers.get('content-type'),
+    bodySample: text.slice(0, 500),
+  }
+  if (!resp.ok) {
+    throw new Error(`SONDA auth ${resp.status}: ${text.slice(0, 200)}`)
+  }
   // Response may be a raw JWT string or JSON like { token: "..." }
   let token = text.trim()
   try {
     const parsed = JSON.parse(text)
     if (typeof parsed === 'string') token = parsed
     else if (parsed && typeof parsed === 'object') {
-      token = parsed.token ?? parsed.Authorization ?? parsed.access_token ?? parsed.jwt ?? text
+      token = parsed.token
+        ?? parsed.Authorization
+        ?? parsed.authorization
+        ?? parsed.access_token
+        ?? parsed.accessToken
+        ?? parsed.jwt
+        ?? parsed.id_token
+        ?? parsed.data?.token
+        ?? parsed.retorno?.token
+        ?? text
     }
   } catch {
     // raw string token
