@@ -67,7 +67,7 @@ async function getToken(creds: any, force = false): Promise<string> {
 async function fetchPositions(creds: any, token: string): Promise<Response> {
   return fetch(creds.position_url, {
     method: 'GET',
-    headers: { Authorization: token },
+    headers: { Authorization: `Bearer ${token}` },
   })
 }
 
@@ -126,15 +126,26 @@ Deno.serve(async (req) => {
     // Get token (cached) and call positions; retry once on 401
     let token = await getToken(creds)
     let resp = await fetchPositions(creds, token)
-    if (resp.status === 401 || resp.status === 403) {
+    // SONDA returns HTTP 200 with {error:{code:500,message:"invalid token"}} when token expired,
+    // so we must also retry on that payload, not only on 401/403.
+    let needsRetry = resp.status === 401 || resp.status === 403
+    let peekedText: string | null = null
+    if (!needsRetry && resp.ok) {
+      peekedText = await resp.clone().text().catch(() => null)
+      if (peekedText && /invalid token|jsonwebtokenerror|tokenexpirederror/i.test(peekedText)) {
+        needsRetry = true
+      }
+    }
+    if (needsRetry) {
       token = await getToken(creds, true)
       resp = await fetchPositions(creds, token)
+      peekedText = null
     }
     if (!resp.ok) {
       const txt = await resp.text().catch(() => '')
       throw new Error(`SONDA posição ${resp.status}: ${txt.slice(0, 200)}`)
     }
-    const rawText = await resp.text()
+    const rawText = peekedText ?? (await resp.text())
     let raw: any = null
     try { raw = JSON.parse(rawText) } catch { /* keep null */ }
     const list: any[] = Array.isArray(raw)
