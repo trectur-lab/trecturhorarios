@@ -150,7 +150,7 @@ Deno.serve(async (req) => {
       const r = await fetchPositions(creds, token, style)
       const t = await r.text()
       attempts.push({ style, status: r.status, sample: t.slice(0, 200) })
-      const looksOk = r.ok && !/invalid token|jsonwebtokenerror|tokenexpirederror/i.test(t)
+      const looksOk = r.ok && !/invalid token|jsonwebtokenerror|tokenexpirederror|authorizationrequired|unauthorized/i.test(t)
       if (looksOk) {
         resp = r
         rawText = t
@@ -161,6 +161,7 @@ Deno.serve(async (req) => {
       return new Response(JSON.stringify({
         error: 'SONDA rejeitou o token em todas as variantes de header',
         attempts,
+        authDebug: lastAuthDebug,
         tokenPreview: token.slice(0, 30) + '…' + token.slice(-10),
         tokenLength: token.length,
       }), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
