@@ -64,11 +64,12 @@ async function getToken(creds: any, force = false): Promise<string> {
   return token
 }
 
-async function fetchPositions(creds: any, token: string): Promise<Response> {
-  return fetch(creds.position_url, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${token}` },
-  })
+async function fetchPositions(creds: any, token: string, headerStyle: 'bearer' | 'raw' | 'x-access-token' = 'bearer'): Promise<Response> {
+  const headers: Record<string, string> = {}
+  if (headerStyle === 'bearer') headers['Authorization'] = `Bearer ${token}`
+  else if (headerStyle === 'raw') headers['Authorization'] = token
+  else headers['x-access-token'] = token
+  return fetch(creds.position_url, { method: 'GET', headers })
 }
 
 function computeStatus(velocidade: number, dataHoraIso: string, prevIdleMap: Map<string, number>, codigo: string) {
@@ -124,28 +125,31 @@ Deno.serve(async (req) => {
     }
 
     // Get token (cached) and call positions; retry once on 401
-    let token = await getToken(creds)
-    let resp = await fetchPositions(creds, token)
-    // SONDA returns HTTP 200 with {error:{code:500,message:"invalid token"}} when token expired,
-    // so we must also retry on that payload, not only on 401/403.
-    let needsRetry = resp.status === 401 || resp.status === 403
-    let peekedText: string | null = null
-    if (!needsRetry && resp.ok) {
-      peekedText = await resp.clone().text().catch(() => null)
-      if (peekedText && /invalid token|jsonwebtokenerror|tokenexpirederror/i.test(peekedText)) {
-        needsRetry = true
+    // Force fresh token every call while debugging
+    let token = await getToken(creds, true)
+    const attempts: Array<{ style: 'bearer' | 'raw' | 'x-access-token'; status: number; sample: string }> = []
+    let resp: Response | null = null
+    let rawText = ''
+    for (const style of ['bearer', 'raw', 'x-access-token'] as const) {
+      const r = await fetchPositions(creds, token, style)
+      const t = await r.text()
+      attempts.push({ style, status: r.status, sample: t.slice(0, 200) })
+      const looksOk = r.ok && !/invalid token|jsonwebtokenerror|tokenexpirederror/i.test(t)
+      if (looksOk) {
+        resp = r
+        rawText = t
+        break
       }
     }
-    if (needsRetry) {
-      token = await getToken(creds, true)
-      resp = await fetchPositions(creds, token)
-      peekedText = null
+    if (!resp) {
+      return new Response(JSON.stringify({
+        error: 'SONDA rejeitou o token em todas as variantes de header',
+        attempts,
+        tokenPreview: token.slice(0, 30) + '…' + token.slice(-10),
+        tokenLength: token.length,
+      }), { status: 502, headers: { ...corsHeaders, 'Content-Type': 'application/json' } })
     }
-    if (!resp.ok) {
-      const txt = await resp.text().catch(() => '')
-      throw new Error(`SONDA posição ${resp.status}: ${txt.slice(0, 200)}`)
-    }
-    const rawText = peekedText ?? (await resp.text())
+    // rawText already populated above
     let raw: any = null
     try { raw = JSON.parse(rawText) } catch { /* keep null */ }
     const list: any[] = Array.isArray(raw)
