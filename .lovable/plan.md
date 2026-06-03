@@ -1,34 +1,42 @@
-## Problema
+## Diagnóstico
 
-O mapa aparece corretamente (Leaflet + OpenStreetMap OK), mas **sem nenhum marcador de ônibus**. A edge function `sonda-vehicle-position` autentica com sucesso (200 OK), porém o endpoint `obterPosicaoVeiculo` retorna `total: 0` — ou seja, lista vazia.
+A edge function `sonda-vehicle-position` está funcionando: retorna **3 veículos da linha 01** (todos com `sentido: "ida"` ou `"volta"` e `trajeto` tipo `"Linha 01 - Partidas Jardim Paraíso - (Via Polivalente e Jardim Europa II)"`).
 
-## Plano em duas etapas
+O bug está no **hook `useLineVehicles`**, no filtro por sentido:
 
-### Etapa 1 — Diagnóstico (modo "debug")
+```ts
+const filtered = mapSentido
+  ? list.filter((v) => !v.sentido || v.sentido.toLowerCase().includes(mapSentido.toLowerCase()))
+  : list;
+```
 
-Adicionar à edge function `sonda-vehicle-position` um modo opcional `debug: true` que:
+- `mapSentido` recebe o `selectedDirection` da UI, que é o nome do bairro (`"Jardim Paraíso"`, `"Jardim Europa II"`, etc.) — o que está cadastrado em `bus_lines.directions`.
+- O campo `sentido` da SONDA é apenas `"ida"` / `"volta"`, nunca contém nome de bairro.
+- Resultado: nenhum veículo passa no filtro, e o mapa fica vazio mesmo com o endpoint devolvendo dados certos.
 
-- Loga o status HTTP, headers principais e os primeiros 2 KB do corpo bruto retornado pela SONDA.
-- Devolve no JSON de resposta uma amostra do payload bruto (`rawSample`) e a contagem antes de qualquer filtro.
+## Correção
 
-Em seguida, executar o teste via `curl_edge_functions` com `{"numeroLinha":"01","debug":true}` para inspecionar o que a SONDA está realmente devolvendo. Três cenários possíveis:
+Trocar o critério de filtro do frontend para casar contra o `trajeto` (que contém o nome do destino, ex.: `"Partidas Jardim Paraíso"`), com fallback permissivo quando o `trajeto` vier vazio.
 
-| Cenário | Como identificar | Correção |
-|---|---|---|
-| Resposta vem dentro de um campo aninhado | `rawSample` mostra `{"retorno":{...}}` ou `{"dados":[...]}` | Ampliar o parsing em `list = ...` para reconhecer essas chaves |
-| Endpoint exige parâmetros na query | Resposta vazia mesmo com payload válido / mensagem específica nos headers | Adicionar parâmetros corretos (ex.: `idLinha`, `idEmpresa`) à URL |
-| API realmente não tem veículos transmitindo agora | `rawSample` é `[]` literal | Confirmar com o usuário (operação noturna, frota desligada) |
+### Mudança em `src/hooks/useLineVehicles.ts`
 
-### Etapa 2 — Correção
+```ts
+const norm = (s: string) =>
+  s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-Aplicar o ajuste indicado pelo diagnóstico:
+const filtered = mapSentido
+  ? list.filter((v) => !v.trajeto || norm(v.trajeto).includes(norm(mapSentido)))
+  : list;
+```
 
-- **Se for aninhamento**: expandir o fallback do parser para cobrir `raw?.retorno?.veiculos`, `raw?.dados`, `raw?.lista`, etc.
-- **Se faltarem parâmetros**: aceitar campos adicionais nas credenciais (`extra_query_params` opcional na tabela `sonda_credentials`) ou ler `bus_lines.sonda_id_linha` e enviar como query param para a SONDA.
-- **Se for ausência real de dados**: deixar mensagem no mapa ("Nenhum veículo transmitindo no momento") e desativar o modo debug.
+- Normaliza acentos para evitar falhas em "São", "Três", etc.
+- Mantém veículos sem `trajeto` (ônibus que acabaram de ligar) em vez de descartá-los.
+- Não toca em nenhuma lógica de backend.
 
-Por fim, remover o modo debug ou deixá-lo protegido por um header interno antes de finalizar.
+## Por que não mexer no backend
 
-## Pergunta para você
+O endpoint da SONDA já está estável (`200 OK`, 45 veículos totais, parsing correto via `raw.veiculos`, campos `latitude`/`longitude` mapeados). Não há motivo para alterar a edge function.
 
-Você teria como me reenviar (ou colar aqui) o trecho da **documentação da SONDA** que descreve o endpoint `obterPosicaoVeiculo` — especificamente a parte de **parâmetros de requisição** e **formato da resposta de exemplo**? Isso pula direto a Etapa 1 e me deixa corrigir na primeira tentativa. Caso contrário sigo com o diagnóstico via logs.
+## Limpeza opcional
+
+Remover o `debug: true` do `.lovable/plan.md` e o bloco `debug` do response da edge function não é necessário para a correção, mas posso deixar para um passo posterior se quiser manter o código mais enxuto.

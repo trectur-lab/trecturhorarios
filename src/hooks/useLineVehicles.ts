@@ -33,8 +33,10 @@ export function useLineVehicles(numeroLinha: string | null, mapSentido?: string)
       });
       if (error) throw error;
       const list: SondaVehicle[] = data?.vehicles ?? [];
+      const norm = (s: string) =>
+        s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
       const filtered = mapSentido
-        ? list.filter((v) => !v.sentido || v.sentido.toLowerCase().includes(mapSentido.toLowerCase()))
+        ? list.filter((v) => !v.trajeto || norm(v.trajeto).includes(norm(mapSentido)))
         : list;
       setVehicles(filtered);
       setLastFetch(data?.fetchedAt ?? new Date().toISOString());
