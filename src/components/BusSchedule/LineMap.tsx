@@ -7,30 +7,28 @@ import { useLineVehicles } from "@/hooks/useLineVehicles";
 
 interface LineMapProps {
   numeroLinha: string;
+  nomeLinha?: string;
   cor: string;
   mapSentido?: string;
 }
 
-function arrowIcon(color: string, bearing: number) {
-  const svg = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"
-      style="transform: rotate(${bearing}deg); transform-origin: center;">
-      <path d="M12 2 L19 20 L12 16 L5 20 Z" fill="${color}" stroke="white" stroke-width="1.2"/>
-    </svg>`;
+function vehicleIcon(color: string, bearing: number, label: string, moving: boolean) {
+  const shape = moving
+    ? `<svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24"
+         style="transform: rotate(${bearing}deg); transform-origin: center;">
+         <path d="M12 2 L19 20 L12 16 L5 20 Z" fill="${color}" stroke="white" stroke-width="1.2"/>
+       </svg>`
+    : `<div style="width:16px;height:16px;border-radius:9999px;background:${color};border:2px solid white;box-shadow:0 0 0 1px rgba(0,0,0,.4)"></div>`;
+  const html = `
+    <div style="display:flex;align-items:center;gap:4px;transform:translateX(-50%);white-space:nowrap;">
+      ${shape}
+      <span style="background:white;border:1px solid rgba(0,0,0,.6);border-radius:6px;padding:1px 5px;font:600 11px/1.1 system-ui,sans-serif;color:#111;box-shadow:0 1px 2px rgba(0,0,0,.25);">${label}</span>
+    </div>`;
   return L.divIcon({
-    html: svg,
+    html,
     className: "",
-    iconSize: [28, 28],
+    iconSize: [64, 28],
     iconAnchor: [14, 14],
-  });
-}
-
-function dotIcon(color: string) {
-  return L.divIcon({
-    html: `<div style="width:14px;height:14px;border-radius:9999px;background:${color};border:2px solid white;box-shadow:0 0 0 1px rgba(0,0,0,.4)"></div>`,
-    className: "",
-    iconSize: [14, 14],
-    iconAnchor: [7, 7],
   });
 }
 
@@ -40,7 +38,7 @@ const STATUS_COLOR = {
   stopped: "#ef4444",
 } as const;
 
-export const LineMap = ({ numeroLinha, cor, mapSentido }: LineMapProps) => {
+export const LineMap = ({ numeroLinha, nomeLinha, cor, mapSentido }: LineMapProps) => {
   const { vehicles, lastFetch, refresh, loading, error } = useLineVehicles(numeroLinha, mapSentido);
   const [fullscreen, setFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -80,15 +78,29 @@ export const LineMap = ({ numeroLinha, cor, mapSentido }: LineMapProps) => {
         />
         {vehicles.map((v) => {
           const color = STATUS_COLOR[v.status];
-          const icon = v.status === "moving" ? arrowIcon(color, v.bearing || 0) : dotIcon(color);
+          const label = v.codigo || v.placa || "?";
+          const icon = vehicleIcon(color, v.bearing || 0, label, v.status === "moving");
+          const statusLabel =
+            v.status === "moving" ? "em movimento" : v.status === "idle" ? "parado ≤1min" : "parado +1min";
           return (
             <Marker key={v.codigo} position={[v.lat, v.lng]} icon={icon}>
               <Popup>
-                <div className="text-xs space-y-0.5">
-                  <div><strong>{v.placa || v.codigo}</strong></div>
+                <div className="text-xs space-y-0.5 min-w-[220px]">
+                  <div className="font-semibold text-sm mb-1">
+                    Linha {numeroLinha}{nomeLinha ? ` — ${nomeLinha}` : ""}
+                  </div>
+                  {v.placa && <div>Placa: {v.placa}</div>}
+                  <div>Veículo: {v.codigo}</div>
                   <div>Velocidade: {v.velocidade} km/h</div>
                   <div>Sentido: {v.sentido || "—"}</div>
-                  <div>Atualizado: {new Date(v.dataHora).toLocaleTimeString("pt-BR")}</div>
+                  <div>Estado: {statusLabel}</div>
+                  <div>Rumo: {Math.round(v.bearing || 0)}°</div>
+                  {v.trajeto && (
+                    <div className="pt-1 text-muted-foreground">{v.trajeto}</div>
+                  )}
+                  <div className="text-muted-foreground">
+                    Última posição: {new Date(v.dataHora).toLocaleTimeString("pt-BR")}
+                  </div>
                 </div>
               </Popup>
             </Marker>
