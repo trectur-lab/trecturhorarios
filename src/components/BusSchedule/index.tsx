@@ -81,6 +81,10 @@ export const BusSchedule = () => {
 
   const nextBus = getNextBus();
 
+  const directionIndex = selectedLinha?.directions.indexOf(selectedDirection) ?? -1;
+  const mapSentido: "ida" | "volta" | null =
+    directionIndex < 0 ? null : directionIndex === 0 ? "ida" : "volta";
+
   const calculateTimeToNext = () => {
     if (!nextBus) return null;
     const now = new Date();
@@ -176,7 +180,7 @@ export const BusSchedule = () => {
               numeroLinha={selectedLinha.numero}
               nomeLinha={selectedLinha.nome}
               cor={selectedLinha.cor}
-              mapSentido={selectedDirection}
+              mapSentido={mapSentido}
             />
           </section>
         )}
