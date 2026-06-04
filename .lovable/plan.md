@@ -1,42 +1,41 @@
-## Diagnóstico
+## Objetivo
 
-A edge function `sonda-vehicle-position` está funcionando: retorna **3 veículos da linha 01** (todos com `sentido: "ida"` ou `"volta"` e `trajeto` tipo `"Linha 01 - Partidas Jardim Paraíso - (Via Polivalente e Jardim Europa II)"`).
+No mapa, exibir **apenas** os veículos do sentido correspondente à partida selecionada — em vez de esmaecer os do outro sentido por correspondência de texto.
 
-O bug está no **hook `useLineVehicles`**, no filtro por sentido:
+Regra:
+- 1ª opção de "Ponto Inicial / Partida" → somente `sentido = "ida"`
+- 2ª+ opção → somente `sentido = "volta"`
 
-```ts
-const filtered = mapSentido
-  ? list.filter((v) => !v.sentido || v.sentido.toLowerCase().includes(mapSentido.toLowerCase()))
-  : list;
-```
+## Mudanças
 
-- `mapSentido` recebe o `selectedDirection` da UI, que é o nome do bairro (`"Jardim Paraíso"`, `"Jardim Europa II"`, etc.) — o que está cadastrado em `bus_lines.directions`.
-- O campo `sentido` da SONDA é apenas `"ida"` / `"volta"`, nunca contém nome de bairro.
-- Resultado: nenhum veículo passa no filtro, e o mapa fica vazio mesmo com o endpoint devolvendo dados certos.
+### 1. `src/components/BusSchedule/index.tsx`
 
-## Correção
-
-Trocar o critério de filtro do frontend para casar contra o `trajeto` (que contém o nome do destino, ex.: `"Partidas Jardim Paraíso"`), com fallback permissivo quando o `trajeto` vier vazio.
-
-### Mudança em `src/hooks/useLineVehicles.ts`
+Calcular o sentido alvo a partir do índice da partida selecionada e repassar ao `LineMap`:
 
 ```ts
-const norm = (s: string) =>
-  s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-
-const filtered = mapSentido
-  ? list.filter((v) => !v.trajeto || norm(v.trajeto).includes(norm(mapSentido)))
-  : list;
+const directionIndex = selectedLinha?.directions.indexOf(selectedDirection) ?? -1;
+const mapSentido: "ida" | "volta" | null =
+  directionIndex < 0 ? null : directionIndex === 0 ? "ida" : "volta";
 ```
 
-- Normaliza acentos para evitar falhas em "São", "Três", etc.
-- Mantém veículos sem `trajeto` (ônibus que acabaram de ligar) em vez de descartá-los.
-- Não toca em nenhuma lógica de backend.
+Substituir `mapSentido={selectedDirection}` por `mapSentido={mapSentido}` no `<LineMap />`.
 
-## Por que não mexer no backend
+### 2. `src/components/BusSchedule/LineMap.tsx`
 
-O endpoint da SONDA já está estável (`200 OK`, 45 veículos totais, parsing correto via `raw.veiculos`, campos `latitude`/`longitude` mapeados). Não há motivo para alterar a edge function.
+- Trocar a prop `mapSentido?: string` por `mapSentido?: "ida" | "volta" | null`.
+- Filtrar `vehicles` ocultando os que não batem com `mapSentido` (comparação case-insensitive em `v.sentido`).
+- Veículos sem `sentido` informado: ocultar quando `mapSentido` está definido.
+- Remover qualquer lógica de "dim" — agora só renderiza os que passam no filtro.
 
-## Limpeza opcional
+### 3. `src/hooks/useLineVehicles.ts`
 
-Remover o `debug: true` do `.lovable/plan.md` e o bloco `debug` do response da edge function não é necessário para a correção, mas posso deixar para um passo posterior se quiser manter o código mais enxuto.
+Ajustar o filtro atual (que compara `trajeto` com o nome do bairro) para o novo contrato:
+- Aceitar `mapSentido: "ida" | "volta" | null`.
+- Filtrar por `v.sentido === mapSentido` (lowercase) quando definido.
+- Sem `mapSentido` → retorna todos.
+
+## Notas
+
+- Confirmado via edge function `sonda-vehicle-position`: `sentido` vem como `"ida"` ou `"volta"` em lowercase.
+- Filtros existentes (garagem 75m, idade máx. 10min) permanecem inalterados.
+- Nenhuma mudança em edge function, banco ou outros hooks.
