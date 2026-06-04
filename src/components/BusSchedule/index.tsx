@@ -174,6 +174,7 @@ export const BusSchedule = () => {
           <section className="animate-fade-in" style={{ animationDelay: '150ms' }}>
             <LineMap
               numeroLinha={selectedLinha.numero}
+              nomeLinha={selectedLinha.nome}
               cor={selectedLinha.cor}
               mapSentido={selectedDirection}
             />
