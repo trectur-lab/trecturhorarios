@@ -9,7 +9,7 @@ interface LineMapProps {
   numeroLinha: string;
   nomeLinha?: string;
   cor: string;
-  mapSentido?: string;
+  mapSentido?: "ida" | "volta" | null;
 }
 
 function vehicleIcon(color: string, bearing: number, label: string, moving: boolean) {

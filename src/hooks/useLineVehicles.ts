@@ -17,7 +17,10 @@ export interface SondaVehicle {
 
 const POLL_MS = 15_000;
 
-export function useLineVehicles(numeroLinha: string | null, mapSentido?: string) {
+export function useLineVehicles(
+  numeroLinha: string | null,
+  mapSentido?: "ida" | "volta" | null,
+) {
   const [vehicles, setVehicles] = useState<SondaVehicle[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -33,10 +36,8 @@ export function useLineVehicles(numeroLinha: string | null, mapSentido?: string)
       });
       if (error) throw error;
       const list: SondaVehicle[] = data?.vehicles ?? [];
-      const norm = (s: string) =>
-        s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
       const filtered = mapSentido
-        ? list.filter((v) => !v.trajeto || norm(v.trajeto).includes(norm(mapSentido)))
+        ? list.filter((v) => (v.sentido || "").toLowerCase() === mapSentido)
         : list;
       setVehicles(filtered);
       setLastFetch(data?.fetchedAt ?? new Date().toISOString());
