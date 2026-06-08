@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { MapContainer, Marker, Popup, TileLayer } from "react-leaflet";
+import { MapContainer, Marker, Popup, TileLayer, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { Maximize2, Minimize2, RefreshCw } from "lucide-react";
 import { useLineVehicles } from "@/hooks/useLineVehicles";
+import type { SondaVehicle } from "@/hooks/useLineVehicles";
 
 interface LineMapProps {
   numeroLinha: string;
@@ -38,6 +39,36 @@ const STATUS_COLOR = {
   stopped: "#ef4444",
 } as const;
 
+function RecenterOnVehicles({ vehicles }: { vehicles: SondaVehicle[] }) {
+  const map = useMap();
+  const lastKeyRef = useRef<string>("");
+  useEffect(() => {
+    if (vehicles.length === 0) return;
+    const key = vehicles.map((v) => v.codigo).sort().join(",");
+    if (key === lastKeyRef.current) return;
+    lastKeyRef.current = key;
+    if (vehicles.length === 1) {
+      map.setView([vehicles[0].lat, vehicles[0].lng], 15, { animate: true });
+    } else {
+      const bounds = L.latLngBounds(vehicles.map((v) => [v.lat, v.lng] as [number, number]));
+      map.fitBounds(bounds.pad(0.2), { animate: true });
+    }
+  }, [vehicles, map]);
+  return null;
+}
+
+function InvalidateOnResize({ trigger }: { trigger: unknown }) {
+  const map = useMap();
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => {
+      map.invalidateSize();
+      setTimeout(() => map.invalidateSize(), 200);
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [trigger, map]);
+  return null;
+}
+
 export const LineMap = ({ numeroLinha, nomeLinha, cor, mapSentido }: LineMapProps) => {
   const { vehicles, lastFetch, refresh, loading, error } = useLineVehicles(numeroLinha, mapSentido);
   const [fullscreen, setFullscreen] = useState(false);
@@ -50,6 +81,15 @@ export const LineMap = ({ numeroLinha, nomeLinha, cor, mapSentido }: LineMapProp
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [fullscreen]);
 
   const center = useMemo<[number, number]>(() => {
     if (vehicles.length > 0) return [vehicles[0].lat, vehicles[0].lng];
@@ -76,6 +116,8 @@ export const LineMap = ({ numeroLinha, nomeLinha, cor, mapSentido }: LineMapProp
           attribution='&copy; OpenStreetMap'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+        <RecenterOnVehicles vehicles={vehicles} />
+        <InvalidateOnResize trigger={fullscreen} />
         {vehicles.map((v) => {
           const color = STATUS_COLOR[v.status];
           const label = v.codigo || v.placa || "?";
@@ -108,23 +150,14 @@ export const LineMap = ({ numeroLinha, nomeLinha, cor, mapSentido }: LineMapProp
         })}
       </MapContainer>
 
-      {/* Fullscreen toggle */}
-      <button
-        type="button"
-        onClick={() => setFullscreen((v) => !v)}
-        className="absolute top-3 right-3 z-[1000] inline-flex items-center justify-center w-9 h-9 bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow-lg hover:scale-105 transition-transform"
-        aria-label={fullscreen ? "Sair de tela cheia" : "Tela cheia"}
-      >
-        {fullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-      </button>
-
-      {/* Legend + status */}
-      <div className="absolute bottom-3 left-3 z-[1000] flex items-center gap-2 bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow px-3 py-2 text-xs">
+      {/* Legend (top-left) */}
+      <div className="absolute top-3 left-3 z-[1000] flex flex-wrap items-center gap-2 bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow px-3 py-2 text-xs max-w-[calc(100%-1.5rem)]">
         <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full" style={{ background: STATUS_COLOR.moving }} />Em movimento</span>
         <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full" style={{ background: STATUS_COLOR.idle }} />Parado ≤1min</span>
         <span className="flex items-center gap-1"><span className="w-2.5 h-2.5 rounded-full" style={{ background: STATUS_COLOR.stopped }} />Parado +1min</span>
       </div>
 
+      {/* Status + controls (bottom-right) */}
       <div className="absolute bottom-3 right-3 z-[1000] flex items-center gap-2 bg-background/95 backdrop-blur-sm border border-border rounded-lg shadow px-3 py-2 text-xs">
         {error ? (
           <span className="text-destructive">{error}</span>
@@ -141,6 +174,14 @@ export const LineMap = ({ numeroLinha, nomeLinha, cor, mapSentido }: LineMapProp
           aria-label="Atualizar veículos"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setFullscreen((v) => !v)}
+          className="inline-flex items-center justify-center w-7 h-7 rounded-md hover:bg-secondary"
+          aria-label={fullscreen ? "Sair de tela cheia" : "Tela cheia"}
+        >
+          {fullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
         </button>
       </div>
     </div>

@@ -12,6 +12,12 @@ const GARAGE_RADIUS_M = 75
 const MAX_AGE_MS = 10 * 60 * 1000
 const TOKEN_TTL_MS = 50 * 60 * 1000 // refresh token every 50 min
 
+// Datum offset applied to every coordinate before returning.
+// Set non-zero values if SONDA returns SAD69/Córrego Alegre instead of WGS84.
+// Approx. SAD69 -> WGS84 for region of Três Corações/MG: +0.000061 lat, -0.000028 lng.
+const DATUM_OFFSET_LAT = 0
+const DATUM_OFFSET_LNG = 0
+
 function haversine(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
   const R = 6371000
   const toRad = (d: number) => (d * Math.PI) / 180
@@ -176,8 +182,10 @@ Deno.serve(async (req) => {
     const now = Date.now()
     const vehicles = list
       .map((v) => {
-        const lat = Number(v.lat ?? v.latitude)
-        const lng = Number(v.lng ?? v.longitude ?? v.lon)
+        const latRaw = Number(v.lat ?? v.latitude)
+        const lngRaw = Number(v.lng ?? v.longitude ?? v.lon)
+        const lat = latRaw + DATUM_OFFSET_LAT
+        const lng = lngRaw + DATUM_OFFSET_LNG
         const rawDt = v.dataHora ?? v.dt ?? v.timestamp
         // SONDA returns epoch ms; also support ISO strings
         const dataHora =
@@ -223,6 +231,7 @@ Deno.serve(async (req) => {
         firstItemSample: list[0] ?? null,
         targetLinha: normalizeLinha(numeroLinha),
         distinctLinhasInResponse: Array.from(new Set(list.map((v: any) => v?.linha).filter(Boolean))).slice(0, 50),
+        datumOffset: { lat: DATUM_OFFSET_LAT, lng: DATUM_OFFSET_LNG },
       }
     }
     return new Response(JSON.stringify(responseBody), {
