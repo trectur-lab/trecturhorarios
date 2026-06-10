@@ -14,7 +14,17 @@ export interface PublicBusLine {
   via: string | null;
   cor: string;
   directions: string[];
+  sonda_codigo_veiculo?: string | null;
 }
+
+export type SpecialDateDayType = 'uteis' | 'sabados' | 'domingos' | 'no_service';
+
+export interface SpecialDateInfo {
+  description: string;
+  overrides: Record<number, SpecialDateDayType>;
+}
+
+export type SpecialDatesMap = Record<string, SpecialDateInfo>;
 
 interface CachedData {
   lines: PublicBusLine[];
@@ -23,24 +33,11 @@ interface CachedData {
     sabados: Record<string, ScheduleItem[]>;
     domingos: Record<string, ScheduleItem[]>;
   }>;
+  specialDates: SpecialDatesMap;
   cachedAt: string;
 }
 
 const CACHE_KEY = 'trectur_bus_data';
-const SPECIAL_CACHE_KEY = 'trectur_special_dates';
-
-type OverrideKind = 'uteis' | 'sabados' | 'domingos' | 'no_service';
-
-interface SpecialDateRow {
-  id: string;
-  date: string;
-  default_override: OverrideKind | null;
-}
-interface OverrideRow {
-  special_date_id: string;
-  bus_line_id: number;
-  override: OverrideKind;
-}
 
 function loadCache(): CachedData | null {
   try {
@@ -63,8 +60,7 @@ function saveCache(data: CachedData) {
 export function useBusSchedulesPublic() {
   const [lines, setLines] = useState<PublicBusLine[]>([]);
   const [schedulesMap, setSchedulesMap] = useState<CachedData['schedules']>({});
-  const [specialDates, setSpecialDates] = useState<SpecialDateRow[]>([]);
-  const [overrides, setOverrides] = useState<OverrideRow[]>([]);
+  const [specialDates, setSpecialDates] = useState<SpecialDatesMap>({});
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
@@ -80,18 +76,6 @@ export function useBusSchedulesPublic() {
       window.removeEventListener('online', onOnline);
       window.removeEventListener('offline', onOffline);
     };
-  }, []);
-
-  const fetchSpecialDates = useCallback(async () => {
-    const [d, o] = await Promise.all([
-      supabase.from('special_dates').select('id, date, default_override'),
-      supabase.from('special_date_line_overrides').select('special_date_id, bus_line_id, override'),
-    ]);
-    if (!d.error && d.data) {
-      setSpecialDates(d.data as SpecialDateRow[]);
-      try { localStorage.setItem(SPECIAL_CACHE_KEY, JSON.stringify({ dates: d.data, overrides: o.data ?? [] })); } catch {}
-    }
-    if (!o.error && o.data) setOverrides(o.data as OverrideRow[]);
   }, []);
 
   const fetchFromDB = useCallback(async (): Promise<CachedData | null> => {
@@ -167,11 +151,40 @@ export function useBusSchedulesPublic() {
       via: l.via,
       cor: l.cor,
       directions: l.directions,
+      sonda_codigo_veiculo: (l as any).sonda_codigo_veiculo ?? null,
     }));
+
+    // Fetch special dates + overrides
+    const specialDates: SpecialDatesMap = {};
+    const { data: sdRows } = await supabase
+      .from('special_dates')
+      .select('id, date, description');
+    if (sdRows && sdRows.length > 0) {
+      const byId: Record<string, { date: string; description: string }> = {};
+      for (const r of sdRows) {
+        byId[r.id] = { date: r.date, description: r.description || '' };
+      }
+      const { data: ovs } = await supabase
+        .from('special_date_line_overrides')
+        .select('special_date_id, bus_line_id, day_type');
+      const ovByDateId: Record<string, Record<number, SpecialDateDayType>> = {};
+      for (const o of ovs || []) {
+        const m = (ovByDateId[o.special_date_id] = ovByDateId[o.special_date_id] || {});
+        m[o.bus_line_id] = o.day_type as SpecialDateDayType;
+      }
+      for (const id of Object.keys(byId)) {
+        const meta = byId[id];
+        specialDates[meta.date] = {
+          description: meta.description,
+          overrides: ovByDateId[id] || {},
+        };
+      }
+    }
 
     return {
       lines: publicLines,
       schedules,
+      specialDates,
       cachedAt: new Date().toISOString(),
     };
   }, []);
@@ -179,6 +192,7 @@ export function useBusSchedulesPublic() {
   const applyData = useCallback((data: CachedData) => {
     setLines(data.lines);
     setSchedulesMap(data.schedules);
+    setSpecialDates(data.specialDates || {});
     setLastUpdated(data.cachedAt);
   }, []);
 
@@ -192,14 +206,6 @@ export function useBusSchedulesPublic() {
       if (cached) {
         applyData(cached);
       }
-      try {
-        const sc = localStorage.getItem(SPECIAL_CACHE_KEY);
-        if (sc) {
-          const parsed = JSON.parse(sc);
-          setSpecialDates(parsed.dates ?? []);
-          setOverrides(parsed.overrides ?? []);
-        }
-      } catch {}
 
       // Try to fetch fresh data
       if (navigator.onLine) {
@@ -209,7 +215,6 @@ export function useBusSchedulesPublic() {
             applyData(fresh);
             saveCache(fresh);
           }
-          await fetchSpecialDates();
         } catch (err) {
           console.error('Error fetching bus data:', err);
           // If no cache, show error
@@ -225,7 +230,7 @@ export function useBusSchedulesPublic() {
     };
 
     init();
-  }, [fetchFromDB, applyData, fetchSpecialDates]);
+  }, [fetchFromDB, applyData]);
 
   // Manual refresh
   const refreshData = useCallback(async () => {
@@ -242,50 +247,22 @@ export function useBusSchedulesPublic() {
         saveCache(fresh);
         toast.success('Dados atualizados com sucesso');
       }
-      await fetchSpecialDates();
     } catch (err) {
       console.error('Error refreshing:', err);
       toast.error('Erro ao atualizar dados');
     } finally {
       setIsRefreshing(false);
     }
-  }, [fetchFromDB, applyData, fetchSpecialDates]);
-
-  const resolveOverride = useCallback(
-    (date: string, lineId: number): OverrideKind | null => {
-      const sd = specialDates.find((s) => s.date === date);
-      if (!sd) return null;
-      const lineOverride = overrides.find(
-        (o) => o.special_date_id === sd.id && o.bus_line_id === lineId,
-      );
-      return lineOverride?.override ?? sd.default_override ?? null;
-    },
-    [specialDates, overrides],
-  );
-
-  const resolveDayType = useCallback(
-    (date: string, lineId: number): 'uteis' | 'sabados' | 'domingos' | null => {
-      const ov = resolveOverride(date, lineId);
-      if (!ov || ov === 'no_service') return null;
-      return ov;
-    },
-    [resolveOverride],
-  );
-
-  const isNoService = useCallback(
-    (date: string, lineId: number) => resolveOverride(date, lineId) === 'no_service',
-    [resolveOverride],
-  );
+  }, [fetchFromDB, applyData]);
 
   return {
     lines,
     schedulesMap,
+    specialDates,
     loading,
     isRefreshing,
     isOnline,
     lastUpdated,
     refreshData,
-    resolveDayType,
-    isNoService,
   };
 }

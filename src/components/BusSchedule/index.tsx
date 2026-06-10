@@ -3,8 +3,8 @@ import { Header } from './Header';
 import { Selectors } from './Selectors';
 import { TimeDisplay } from './TimeDisplay';
 import { ScheduleGrid } from './ScheduleGrid';
-import { LineMap } from './LineMap';
 import { useBusSchedulesPublic, ScheduleItem } from '@/hooks/useBusSchedulesPublic';
+import { LineMap } from './LineMap';
 import { RefreshCw, Loader2 } from 'lucide-react';
 
 type DayType = 'uteis' | 'sabados' | 'domingos';
@@ -15,7 +15,7 @@ export const BusSchedule = () => {
   const [selectedDirection, setSelectedDirection] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
-  const { lines, schedulesMap, loading, resolveDayType, isNoService } = useBusSchedulesPublic();
+  const { lines, schedulesMap, specialDates, loading } = useBusSchedulesPublic();
 
   // Set initial selection when lines load
   useEffect(() => {
@@ -35,11 +35,7 @@ export const BusSchedule = () => {
     return () => clearInterval(timer);
   }, []);
 
-  const getDayType = (date: string, lineId: number | null): DayType => {
-    if (lineId != null) {
-      const overridden = resolveDayType(date, lineId);
-      if (overridden) return overridden;
-    }
+  const getDefaultDayType = (date: string): DayType => {
     const d = new Date(date + 'T12:00:00');
     const dayOfWeek = d.getDay();
     if (dayOfWeek === 0) return 'domingos';
@@ -47,16 +43,22 @@ export const BusSchedule = () => {
     return 'uteis';
   };
 
+  const specialInfo = specialDates[selectedDate];
+  const lineOverride = selectedLine != null ? specialInfo?.overrides[selectedLine] : undefined;
+  const isNoService = lineOverride === 'no_service';
+  const dayType: DayType =
+    lineOverride && lineOverride !== 'no_service'
+      ? (lineOverride as DayType)
+      : getDefaultDayType(selectedDate);
+
   const parseTime = (timeStr: string): number => {
     const [hours, minutes] = timeStr.split(':').map(Number);
     return hours * 60 + minutes;
   };
 
   const selectedLinha = lines.find(l => l.id === selectedLine);
-  const dayType = getDayType(selectedDate, selectedLine);
-  const noService = selectedLine != null && isNoService(selectedDate, selectedLine);
   const lineSchedules = selectedLine ? schedulesMap[selectedLine] : null;
-  const schedule: ScheduleItem[] = noService
+  const schedule: ScheduleItem[] = isNoService
     ? []
     : lineSchedules?.[dayType]?.[selectedDirection] || [];
 
@@ -80,10 +82,6 @@ export const BusSchedule = () => {
   };
 
   const nextBus = getNextBus();
-
-  const directionIndex = selectedLinha?.directions.indexOf(selectedDirection) ?? -1;
-  const mapSentido: "ida" | "volta" | null =
-    directionIndex < 0 ? null : directionIndex === 0 ? "ida" : "volta";
 
   const calculateTimeToNext = () => {
     if (!nextBus) return null;
@@ -137,15 +135,36 @@ export const BusSchedule = () => {
           />
         </section>
 
+        {/* Special date banner */}
+        {specialInfo && (
+          <section className="bg-primary/10 border border-primary/40 rounded-xl px-4 py-3 text-sm">
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-primary text-primary-foreground text-xs font-bold uppercase tracking-wide">
+                Data especial
+              </span>
+              {specialInfo.description && (
+                <span className="font-medium">{specialInfo.description}</span>
+              )}
+              {!isNoService && lineOverride && (
+                <span className="text-muted-foreground">
+                  • Esta linha está rodando como <strong>{dayType === 'uteis' ? 'Dias Úteis' : dayType === 'sabados' ? 'Sábados' : 'Domingos/Feriados'}</strong>
+                </span>
+              )}
+            </div>
+          </section>
+        )}
+
         {/* Time Display */}
-        <section className="animate-fade-in">
-          <TimeDisplay
-            currentTime={currentTime}
-            nextBus={nextBus}
-            timeToNext={timeToNext}
-            lineColor={selectedLinha?.cor || '#e74c3c'}
-          />
-        </section>
+        {!isNoService && (
+          <section className="animate-fade-in">
+            <TimeDisplay
+              currentTime={currentTime}
+              nextBus={nextBus}
+              timeToNext={timeToNext}
+              lineColor={selectedLinha?.cor || '#e74c3c'}
+            />
+          </section>
+        )}
 
         {/* Route Info */}
         {selectedLinha?.via && (
@@ -157,33 +176,41 @@ export const BusSchedule = () => {
           </section>
         )}
 
-        {/* Schedule Grid */}
+        {/* Schedule Grid or No Service */}
         <section className="animate-fade-in" style={{ animationDelay: '100ms' }}>
-          {noService ? (
-            <div className="bg-destructive/10 border border-destructive/30 text-destructive rounded-2xl p-6 text-center font-medium">
-              Linha não opera nesta data
+          {isNoService ? (
+            <div className="bg-card border border-border rounded-2xl p-8 text-center space-y-2">
+              <p className="text-lg font-bold text-destructive">Linha não opera nesta data</p>
+              <p className="text-sm text-muted-foreground">
+                {specialInfo?.description || 'Data especial sem operação para esta linha.'}
+              </p>
             </div>
           ) : (
             <ScheduleGrid
-            schedule={schedule}
-            nextBusIndex={nextBus?.index ?? null}
-            dayType={dayType}
-            lineColor={selectedLinha?.cor || '#e74c3c'}
+              schedule={schedule}
+              nextBusIndex={nextBus?.index ?? null}
+              dayType={dayType}
+              lineColor={selectedLinha?.cor || '#e74c3c'}
             />
           )}
         </section>
 
-        {/* Mapa em tempo real */}
-        {selectedLinha && !noService && (
-          <section className="animate-fade-in" style={{ animationDelay: '150ms' }}>
-            <LineMap
-              numeroLinha={selectedLinha.numero}
-              nomeLinha={selectedLinha.nome}
-              cor={selectedLinha.cor}
-              mapSentido={mapSentido}
-            />
-          </section>
-        )}
+        {/* Interactive Map - Live Vehicle Position */}
+        {selectedLinha && (() => {
+          const directionIndex = selectedLinha.directions.indexOf(selectedDirection);
+          const mapSentido: 'ida' | 'volta' | null =
+            directionIndex < 0 ? null : directionIndex === 0 ? 'ida' : 'volta';
+          return (
+            <section className="animate-fade-in" style={{ animationDelay: '150ms' }}>
+              <LineMap
+                numeroLinha={selectedLinha.numero}
+                lineColor={selectedLinha.cor || '#e74c3c'}
+                lineNome={selectedLinha.nome}
+                mapSentido={mapSentido}
+              />
+            </section>
+          );
+        })()}
 
         {/* Footer with Reload Button */}
         <footer className="text-center text-sm text-muted-foreground py-6 space-y-3">

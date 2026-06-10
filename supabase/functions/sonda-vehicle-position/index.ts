@@ -1,247 +1,247 @@
-import { createClient } from 'npm:@supabase/supabase-js@2'
-import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
-import { z } from 'npm:zod@3'
+// Edge Function: sonda-vehicle-position
+// Autentica na SONDA e retorna posições atuais de veículos.
+// Body aceita:
+//   { numeroLinha: "07" }     -> retorna lista de veículos da linha
+//   { codigoVeiculo: "1123" } -> retorna 1 veículo específico
+//   { ping: true }            -> apenas testa o login (admin)
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
-const BodySchema = z.object({
-  numeroLinha: z.string().min(1).max(20),
-  debug: z.boolean().optional(),
-})
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers":
+    "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
+  "Access-Control-Allow-Methods": "POST, OPTIONS",
+};
 
-const GARAGE = { lat: -21.709497, lng: -45.264057 }
-const GARAGE_RADIUS_M = 75
-const MAX_AGE_MS = 10 * 60 * 1000
-const TOKEN_TTL_MS = 50 * 60 * 1000 // refresh token every 50 min
+const DEFAULT_AUTH_URL =
+  "https://consultaviagem.m2mfrota.com.br/AutenticarUsuario";
+const DEFAULT_DATA_URL =
+  "https://zn5.sinopticoplus.com/servico-dados/api/v1/obterPosicaoVeiculo";
 
-// Datum offset applied to every coordinate before returning.
-// Set non-zero values if SONDA returns SAD69/Córrego Alegre instead of WGS84.
-// Approx. SAD69 -> WGS84 for region of Três Corações/MG: +0.000061 lat, -0.000028 lng.
-const DATUM_OFFSET_LAT = 0
-const DATUM_OFFSET_LNG = 0
+let cachedToken: { token: string; expiresAt: number; key: string } | null = null;
 
-function haversine(a: { lat: number; lng: number }, b: { lat: number; lng: number }) {
-  const R = 6371000
-  const toRad = (d: number) => (d * Math.PI) / 180
-  const dLat = toRad(b.lat - a.lat)
-  const dLng = toRad(b.lng - a.lng)
-  const s =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2
-  return 2 * R * Math.asin(Math.sqrt(s))
+interface SondaCreds {
+  auth_url: string;
+  data_url: string;
+  usuario: string;
+  senha: string;
 }
 
-// In-memory token cache (per edge worker instance)
-let cachedToken: { token: string; fetchedAt: number } | null = null
+async function getCreds(): Promise<SondaCreds | null> {
+  const supabase = createClient(
+    Deno.env.get("SUPABASE_URL")!,
+    Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
+  );
+  const { data, error } = await supabase
+    .from("sonda_credentials")
+    .select("auth_url, data_url, usuario, senha")
+    .eq("is_active", true)
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-let lastAuthDebug: any = null
+  if (error) {
+    console.error("[sonda] read creds error:", error.message);
+    return null;
+  }
+  if (!data?.usuario || !data?.senha) return null;
+  return {
+    auth_url: data.auth_url || DEFAULT_AUTH_URL,
+    data_url: data.data_url || DEFAULT_DATA_URL,
+    usuario: data.usuario,
+    senha: data.senha,
+  };
+}
 
-async function authenticate(creds: any): Promise<string> {
-  if (!creds?.auth_url) throw new Error('SONDA auth_url não configurado')
-  const payload = { usuario: creds.username, senha: creds.password }
-  const resp = await fetch(creds.auth_url, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-    body: JSON.stringify(payload),
-  })
-  const text = await resp.text()
-  lastAuthDebug = {
-    status: resp.status,
-    contentType: resp.headers.get('content-type'),
-    bodySample: text.slice(0, 500),
+async function login(creds: SondaCreds): Promise<string | null> {
+  const key = `${creds.auth_url}|${creds.usuario}`;
+  const now = Date.now();
+  if (cachedToken && cachedToken.key === key && cachedToken.expiresAt > now) {
+    return cachedToken.token;
   }
-  if (!resp.ok) {
-    throw new Error(`SONDA auth ${resp.status}: ${text.slice(0, 200)}`)
-  }
-  // Response may be a raw JWT string or JSON like { token: "..." }
-  let token = text.trim()
   try {
-    const parsed = JSON.parse(text)
-    if (typeof parsed === 'string') token = parsed
-    else if (parsed && typeof parsed === 'object') {
-      token = parsed.IdentificacaoLogin
-        ?? parsed.identificacaoLogin
-        ?? parsed.token
-        ?? parsed.Authorization
-        ?? parsed.authorization
-        ?? parsed.access_token
-        ?? parsed.accessToken
-        ?? parsed.jwt
-        ?? parsed.id_token
-        ?? parsed.data?.token
-        ?? parsed.retorno?.token
-        ?? text
+    const res = await fetch(creds.auth_url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ usuario: creds.usuario, senha: creds.senha }),
+    });
+    const txt = await res.text();
+    if (!res.ok) {
+      console.error(`[sonda] login ${res.status}: ${txt.slice(0, 300)}`);
+      return null;
     }
-  } catch {
-    // raw string token
+    let token: string | undefined;
+    try {
+      const json = JSON.parse(txt);
+      token =
+        json?.IdentificacaoLogin ??
+        json?.identificacaoLogin ??
+        json?.token ??
+        json?.Token ??
+        json?.access_token ??
+        json?.accessToken ??
+        json?.data?.IdentificacaoLogin ??
+        json?.data?.token;
+      if (!token && typeof json === "string") token = json;
+    } catch {
+      token = txt.replace(/^"|"$/g, "");
+    }
+    if (!token) {
+      console.error("[sonda] login OK sem token:", txt.slice(0, 300));
+      return null;
+    }
+    cachedToken = { token, key, expiresAt: now + 50 * 60 * 1000 };
+    return token;
+  } catch (e) {
+    console.error("[sonda] login error:", e);
+    return null;
   }
-  // Strip surrounding quotes if present
-  token = token.replace(/^"|"$/g, '').trim()
-  if (!token) throw new Error('SONDA auth retornou token vazio')
-  return token
 }
 
-async function getToken(creds: any, force = false): Promise<string> {
-  if (!force && cachedToken && Date.now() - cachedToken.fetchedAt < TOKEN_TTL_MS) {
-    return cachedToken.token
+interface VehicleOut {
+  codigo: string;
+  placa: string | null;
+  linha: string | null;
+  lat: number;
+  lng: number;
+  velocidade: number;
+  sentido: string | null;
+  trajeto: string | null;
+  dataHora: number | string | null;
+}
+
+function normalize(v: any): VehicleOut | null {
+  const lat = Number(v?.latitude ?? v?.lat);
+  const lng = Number(v?.longitude ?? v?.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  return {
+    codigo: String(v?.codigo ?? v?.id ?? ""),
+    placa: v?.placa ?? null,
+    linha: v?.linha != null ? String(v.linha) : null,
+    lat,
+    lng,
+    velocidade: Number(v?.velocidade ?? 0),
+    sentido: v?.sentido ?? null,
+    trajeto: v?.trajeto ?? null,
+    dataHora: v?.dataHora ?? v?.timestamp ?? null,
+  };
+}
+
+async function fetchVehicles(creds: SondaCreds, token: string) {
+  const res = await fetch(creds.data_url, {
+    method: "GET",
+    headers: { Authorization: token, "Content-Type": "application/json" },
+  });
+  if (res.status === 401) return { authExpired: true as const };
+  if (!res.ok) {
+    const t = await res.text();
+    return { error: `sonda_error_${res.status}: ${t.slice(0, 200)}` };
   }
-  const token = await authenticate(creds)
-  cachedToken = { token, fetchedAt: Date.now() }
-  return token
+  const json = await res.json();
+  const list: any[] = Array.isArray(json)
+    ? json
+    : json?.veiculos ?? json?.data ?? [];
+  return { list };
 }
 
-async function fetchPositions(creds: any, token: string): Promise<Response> {
-  return fetch(creds.position_url, {
-    method: 'GET',
-    headers: { Authorization: `Bearer ${token}` },
-  })
-}
-
-function computeStatus(velocidade: number, dataHoraIso: string, prevIdleMap: Map<string, number>, codigo: string) {
-  const vel = Number(velocidade) || 0
-  const ts = new Date(dataHoraIso).getTime()
-  if (vel > 3) {
-    prevIdleMap.delete(codigo)
-    return { status: 'moving', stoppedForSec: 0 }
-  }
-  const since = prevIdleMap.get(codigo) ?? ts
-  prevIdleMap.set(codigo, since)
-  const stoppedForSec = Math.max(0, Math.floor((Date.now() - since) / 1000))
-  return { status: stoppedForSec > 60 ? 'stopped' : 'idle', stoppedForSec }
-}
-
-const idleSince = new Map<string, number>()
-
-function normalizeLinha(s: string): string {
-  return String(s ?? '').trim().toLowerCase().replace(/^0+/, '')
+function normalizeLineNumber(s: string): string {
+  // Normaliza "07", "7", "07A" para comparação tolerante
+  return s.trim().toUpperCase().replace(/^0+(?=\d)/, "");
 }
 
 Deno.serve(async (req) => {
-  if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  if (req.method === "OPTIONS") {
+    return new Response(null, { headers: corsHeaders });
+  }
 
   try {
-    const parsed = BodySchema.safeParse(await req.json())
-    if (!parsed.success) {
-      return new Response(JSON.stringify({ error: parsed.error.flatten().fieldErrors }), {
-        status: 400,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+    const body = await req.json().catch(() => ({}));
+    const numeroLinha = typeof body?.numeroLinha === "string" ? body.numeroLinha.trim() : "";
+    const codigoVeiculo =
+      typeof body?.codigoVeiculo === "string" ? body.codigoVeiculo.trim() : "";
+    const ping: boolean = body?.ping === true;
+
+    if (!ping && !numeroLinha && !codigoVeiculo) {
+      return new Response(
+        JSON.stringify({
+          vehicles: [],
+          count: 0,
+          message: "missing_filter",
+        }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
-    const { numeroLinha, debug } = parsed.data
 
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    )
-
-    const { data: creds, error: credsErr } = await supabase
-      .from('sonda_credentials')
-      .select('*')
-      .order('updated_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
-
-    if (credsErr) throw credsErr
+    const creds = await getCreds();
     if (!creds) {
-      return new Response(JSON.stringify({ error: 'Credenciais SONDA não configuradas' }), {
-        status: 412,
-        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      })
+      return new Response(
+        JSON.stringify({ error: "credentials_not_configured" }),
+        { status: 503, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
 
-    // Get token (cached) and call positions; retry once if SONDA reports invalid token
-    let token = await getToken(creds)
-    let resp = await fetchPositions(creds, token)
-    let rawText = await resp.text()
-    const isTokenError = (s: string) =>
-      /invalid token|jsonwebtokenerror|tokenexpirederror|authorizationrequired/i.test(s)
-    if (resp.status === 401 || resp.status === 403 || (resp.ok && isTokenError(rawText))) {
-      token = await getToken(creds, true)
-      resp = await fetchPositions(creds, token)
-      rawText = await resp.text()
+    let token = await login(creds);
+    if (!token) {
+      return new Response(
+        JSON.stringify({ error: "auth_failed" }),
+        { status: 502, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
-    if (!resp.ok) {
-      throw new Error(`SONDA posição ${resp.status}: ${rawText.slice(0, 200)}`)
-    }
-    let raw: any = null
-    try { raw = JSON.parse(rawText) } catch { /* keep null */ }
-    const list: any[] = Array.isArray(raw)
-      ? raw
-      : raw?.veiculos
-        ?? raw?.data
-        ?? raw?.dados
-        ?? raw?.lista
-        ?? raw?.retorno?.veiculos
-        ?? raw?.retorno?.dados
-        ?? raw?.result
-        ?? []
 
-    if (debug) {
-      console.log('SONDA raw response sample:', rawText.slice(0, 2000))
-      console.log('SONDA detected list length:', list.length)
+    if (ping) {
+      return new Response(
+        JSON.stringify({ ok: true, message: "Login SONDA bem-sucedido." }),
+        { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+      );
     }
-    const targetLinha = normalizeLinha(numeroLinha)
-    const now = Date.now()
-    const vehicles = list
-      .map((v) => {
-        const latRaw = Number(v.lat ?? v.latitude)
-        const lngRaw = Number(v.lng ?? v.longitude ?? v.lon)
-        const lat = latRaw + DATUM_OFFSET_LAT
-        const lng = lngRaw + DATUM_OFFSET_LNG
-        const rawDt = v.dataHora ?? v.dt ?? v.timestamp
-        // SONDA returns epoch ms; also support ISO strings
-        const dataHora =
-          typeof rawDt === 'number'
-            ? new Date(rawDt).toISOString()
-            : rawDt
-              ? new Date(rawDt).toISOString()
-              : new Date().toISOString()
-        const codigo = String(v.codigo ?? v.codigoVeiculo ?? v.id ?? v.placa ?? '')
-        const { status, stoppedForSec } = computeStatus(v.velocidade ?? 0, dataHora, idleSince, codigo)
-        return {
-          codigo,
-          placa: v.placa ?? v.plate ?? '',
-          linha: String(v.linha ?? ''),
-          lat,
-          lng,
-          velocidade: Number(v.velocidade ?? 0),
-          dataHora,
-          sentido: v.sentido ?? v.direction ?? '',
-          trajeto: v.trajeto ?? v.route ?? '',
-          bearing: Number(v.bearing ?? v.direcao ?? 0),
-          status,
-          stoppedForSec,
-        }
-      })
-      .filter((v) => Number.isFinite(v.lat) && Number.isFinite(v.lng))
-      .filter((v) => normalizeLinha(v.linha) === targetLinha)
-      .filter((v) => now - new Date(v.dataHora).getTime() <= MAX_AGE_MS)
-      .filter((v) => haversine({ lat: v.lat, lng: v.lng }, GARAGE) > GARAGE_RADIUS_M)
 
-    const responseBody: any = {
-      vehicles,
-      fetchedAt: new Date().toISOString(),
-      total: list.length,
-    }
-    if (debug) {
-      responseBody.debug = {
-        httpStatus: resp.status,
-        rawSample: rawText.slice(0, 2000),
-        rawType: Array.isArray(raw) ? 'array' : typeof raw,
-        topLevelKeys: raw && typeof raw === 'object' && !Array.isArray(raw) ? Object.keys(raw) : null,
-        firstItemKeys: list[0] && typeof list[0] === 'object' ? Object.keys(list[0]) : null,
-        firstItemSample: list[0] ?? null,
-        targetLinha: normalizeLinha(numeroLinha),
-        distinctLinhasInResponse: Array.from(new Set(list.map((v: any) => v?.linha).filter(Boolean))).slice(0, 50),
-        datumOffset: { lat: DATUM_OFFSET_LAT, lng: DATUM_OFFSET_LNG },
+    let result = await fetchVehicles(creds, token);
+    if ("authExpired" in result) {
+      cachedToken = null;
+      token = await login(creds);
+      if (!token) {
+        return new Response(JSON.stringify({ error: "auth_failed" }), {
+          status: 502,
+          headers: { ...corsHeaders, "Content-Type": "application/json" },
+        });
       }
+      result = await fetchVehicles(creds, token);
     }
-    return new Response(JSON.stringify(responseBody), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
-  } catch (err) {
-    console.error('sonda-vehicle-position error', err)
-    return new Response(JSON.stringify({ error: (err as Error).message }), {
+
+    if ("error" in result) {
+      return new Response(JSON.stringify({ error: result.error }), {
+        status: 502,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
+    const all = (result.list ?? [])
+      .map(normalize)
+      .filter((v): v is VehicleOut => v !== null);
+
+    let filtered = all;
+    if (codigoVeiculo) {
+      filtered = all.filter((v) => v.codigo === String(codigoVeiculo));
+    } else if (numeroLinha) {
+      const target = normalizeLineNumber(numeroLinha);
+      filtered = all.filter(
+        (v) => v.linha && normalizeLineNumber(v.linha) === target,
+      );
+    }
+
+    return new Response(
+      JSON.stringify({
+        vehicles: filtered,
+        count: filtered.length,
+        fetchedAt: new Date().toISOString(),
+      }),
+      { status: 200, headers: { ...corsHeaders, "Content-Type": "application/json" } },
+    );
+  } catch (e) {
+    console.error("[sonda] unexpected:", e);
+    return new Response(JSON.stringify({ error: "internal_error" }), {
       status: 500,
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-    })
+      headers: { ...corsHeaders, "Content-Type": "application/json" },
+    });
   }
-})
+});

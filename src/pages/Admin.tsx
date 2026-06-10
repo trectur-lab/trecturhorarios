@@ -54,9 +54,9 @@ import {
   Upload,
 } from "lucide-react";
 import { Link } from "react-router-dom";
-import { SondaCredentialsCard } from "@/components/admin/SondaCredentialsCard";
-import { ScheduledChangesCard } from "@/components/admin/ScheduledChangesCard";
-import { SpecialDatesCard } from "@/components/admin/SpecialDatesCard";
+import { SondaCredentialsCard } from "@/components/Admin/SondaCredentialsCard";
+import { ScheduledChangesCard } from "@/components/Admin/ScheduledChangesCard";
+import { SpecialDatesCard } from "@/components/Admin/SpecialDatesCard";
 
 const Admin = () => {
   const { isAdmin, userEmail, signOut } = useAuth();
@@ -85,6 +85,8 @@ const Admin = () => {
     via: "",
     cor: "#3498db",
     directions: "",
+    sonda_codigo_veiculo: "",
+    sonda_id_linha: "",
   });
   const [scheduleForm, setScheduleForm] = useState({
     hora: "",
@@ -116,9 +118,11 @@ const Admin = () => {
       via: lineForm.via || null,
       cor: lineForm.cor,
       directions,
+      sonda_codigo_veiculo: lineForm.sonda_codigo_veiculo.trim() || null,
+      sonda_id_linha: lineForm.sonda_id_linha.trim() || null,
     });
 
-    setLineForm({ numero: "", nome: "", via: "", cor: "#3498db", directions: "" });
+    setLineForm({ numero: "", nome: "", via: "", cor: "#3498db", directions: "", sonda_codigo_veiculo: "", sonda_id_linha: "" });
     setIsLineDialogOpen(false);
   };
 
@@ -136,10 +140,12 @@ const Admin = () => {
       via: lineForm.via || null,
       cor: lineForm.cor,
       directions,
+      sonda_codigo_veiculo: lineForm.sonda_codigo_veiculo.trim() || null,
+      sonda_id_linha: lineForm.sonda_id_linha.trim() || null,
     });
 
     setEditingLine(null);
-    setLineForm({ numero: "", nome: "", via: "", cor: "#3498db", directions: "" });
+    setLineForm({ numero: "", nome: "", via: "", cor: "#3498db", directions: "", sonda_codigo_veiculo: "", sonda_id_linha: "" });
     setIsLineDialogOpen(false);
   };
 
@@ -174,10 +180,19 @@ const Admin = () => {
     if (scheduleForm.hora !== editingSchedule.hora) updates.hora = scheduleForm.hora;
     if (scheduleForm.day_type !== editingSchedule.day_type) updates.day_type = scheduleForm.day_type;
     if (scheduleForm.direction !== editingSchedule.direction) updates.direction = scheduleForm.direction;
-    // Always send obs to allow clearing it (empty string is valid)
-    updates.obs = scheduleForm.obs || null;
+    const newObs = scheduleForm.obs || null;
+    if (newObs !== (editingSchedule.obs ?? null)) updates.obs = newObs;
 
-    await updateSchedule(editingSchedule.id, updates);
+    // Nothing changed — just close the dialog
+    if (Object.keys(updates).length === 0) {
+      setEditingSchedule(null);
+      setScheduleForm({ hora: "", obs: "", day_type: "uteis", direction: "" });
+      setIsScheduleDialogOpen(false);
+      return;
+    }
+
+    const ok = await updateSchedule(editingSchedule.id, updates);
+    if (!ok) return; // keep dialog open so user can retry
 
     setEditingSchedule(null);
     setScheduleForm({ hora: "", obs: "", day_type: "uteis", direction: "" });
@@ -197,6 +212,8 @@ const Admin = () => {
       via: line.via || "",
       cor: line.cor,
       directions: line.directions.join(", "),
+      sonda_codigo_veiculo: line.sonda_codigo_veiculo ?? "",
+      sonda_id_linha: line.sonda_id_linha ?? "",
     });
     setIsLineDialogOpen(true);
   };
@@ -268,7 +285,10 @@ const Admin = () => {
         </div>
       </header>
 
-      <div className="container mx-auto px-4 py-6">
+      <div className="container mx-auto px-4 py-6 space-y-6">
+        <SondaCredentialsCard />
+        <ScheduledChangesCard busLines={busLines} />
+        <SpecialDatesCard busLines={busLines} />
         <div className="grid lg:grid-cols-3 gap-6">
           {/* Lista de Linhas */}
           <Card className="lg:col-span-1">
@@ -280,7 +300,7 @@ const Admin = () => {
                     size="sm"
                     onClick={() => {
                       setEditingLine(null);
-                      setLineForm({ numero: "", nome: "", via: "", cor: "#3498db", directions: "" });
+                      setLineForm({ numero: "", nome: "", via: "", cor: "#3498db", directions: "", sonda_codigo_veiculo: "", sonda_id_linha: "" });
                     }}
                   >
                     <Plus className="w-4 h-4 mr-1" />
@@ -336,6 +356,39 @@ const Admin = () => {
                         onChange={(e) => setLineForm({ ...lineForm, directions: e.target.value })}
                         placeholder="Jardim Paraíso, Jardim Europa II"
                       />
+                    </div>
+                    <div className="border-t border-border pt-4 space-y-4">
+                      <div className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                        Integração SONDA Mobility (opcional)
+                      </div>
+                      <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <Label>Código do Veículo</Label>
+                          <Input
+                            value={lineForm.sonda_codigo_veiculo}
+                            onChange={(e) =>
+                              setLineForm({ ...lineForm, sonda_codigo_veiculo: e.target.value })
+                            }
+                            placeholder="ex: 12345"
+                          />
+                          <p className="text-[11px] text-muted-foreground">
+                            Identificador do veículo na API SONDA. Necessário para o mapa.
+                          </p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>ID da Linha SONDA</Label>
+                          <Input
+                            value={lineForm.sonda_id_linha}
+                            onChange={(e) =>
+                              setLineForm({ ...lineForm, sonda_id_linha: e.target.value })
+                            }
+                            placeholder="opcional"
+                          />
+                          <p className="text-[11px] text-muted-foreground">
+                            Reservado para uso futuro (rota completa).
+                          </p>
+                        </div>
+                      </div>
                     </div>
                   </div>
                   <DialogFooter>
@@ -437,118 +490,107 @@ const Admin = () => {
                     : "Selecione uma linha"}
                 </CardTitle>
                 {selectedLine && (
-                  <>
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        setEditingSchedule(null);
-                        setScheduleForm({
-                          hora: "",
-                          obs: "",
-                          day_type: "uteis",
-                          direction: selectedLine.directions[0] || "",
-                        });
-                        setIsScheduleDialogOpen(true);
-                      }}
-                    >
-                      <Plus className="w-4 h-4 mr-1" />
-                      Novo Horário
-                    </Button>
-                    <Dialog
-                      key={editingSchedule?.id || "new"}
-                      open={isScheduleDialogOpen}
-                      onOpenChange={(open) => {
-                        setIsScheduleDialogOpen(open);
-                        if (!open) {
+                  <Dialog open={isScheduleDialogOpen} onOpenChange={setIsScheduleDialogOpen}>
+                    <DialogTrigger asChild>
+                      <Button
+                        size="sm"
+                        onClick={() => {
                           setEditingSchedule(null);
-                          setScheduleForm({ hora: "", obs: "", day_type: "uteis", direction: "" });
-                        }
-                      }}
-                    >
-                      <DialogContent>
-                        <DialogHeader>
-                          <DialogTitle>
-                            {editingSchedule ? "Editar Horário" : "Novo Horário"}
-                          </DialogTitle>
-                          <DialogDescription>
-                            Preencha os dados do horário
-                          </DialogDescription>
-                        </DialogHeader>
-                        <div className="space-y-4">
-                          <div className="grid grid-cols-2 gap-4">
-                            <div className="space-y-2">
-                              <Label>Horário</Label>
-                              <Input
-                                value={scheduleForm.hora}
-                                onChange={(e) =>
-                                  setScheduleForm({ ...scheduleForm, hora: e.target.value })
-                                }
-                                placeholder="08:30"
-                              />
-                            </div>
-                            <div className="space-y-2">
-                              <Label>Tipo de Dia</Label>
-                              <Select
-                                value={scheduleForm.day_type}
-                                onValueChange={(v) =>
-                                  setScheduleForm({
-                                    ...scheduleForm,
-                                    day_type: v as "uteis" | "sabados" | "domingos",
-                                  })
-                                }
-                              >
-                                <SelectTrigger>
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="uteis">Dias Úteis</SelectItem>
-                                  <SelectItem value="sabados">Sábados</SelectItem>
-                                  <SelectItem value="domingos">Domingos/Feriados</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
+                          setScheduleForm({
+                            hora: "",
+                            obs: "",
+                            day_type: "uteis",
+                            direction: selectedLine.directions[0] || "",
+                          });
+                        }}
+                      >
+                        <Plus className="w-4 h-4 mr-1" />
+                        Novo Horário
+                      </Button>
+                    </DialogTrigger>
+                    <DialogContent>
+                      <DialogHeader>
+                        <DialogTitle>
+                          {editingSchedule ? "Editar Horário" : "Novo Horário"}
+                        </DialogTitle>
+                        <DialogDescription>
+                          Preencha os dados do horário
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="space-y-4">
+                        <div className="grid grid-cols-2 gap-4">
+                          <div className="space-y-2">
+                            <Label>Horário</Label>
+                            <Input
+                              value={scheduleForm.hora}
+                              onChange={(e) =>
+                                setScheduleForm({ ...scheduleForm, hora: e.target.value })
+                              }
+                              placeholder="08:30"
+                            />
                           </div>
                           <div className="space-y-2">
-                            <Label>Ponto de Partida</Label>
+                            <Label>Tipo de Dia</Label>
                             <Select
-                              value={scheduleForm.direction}
+                              value={scheduleForm.day_type}
                               onValueChange={(v) =>
-                                setScheduleForm({ ...scheduleForm, direction: v })
+                                setScheduleForm({
+                                  ...scheduleForm,
+                                  day_type: v as "uteis" | "sabados" | "domingos",
+                                })
                               }
                             >
                               <SelectTrigger>
-                                <SelectValue placeholder="Selecione o ponto" />
+                                <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                {selectedLine?.directions.map((d) => (
-                                  <SelectItem key={d} value={d}>
-                                    {d}
-                                  </SelectItem>
-                                ))}
+                                <SelectItem value="uteis">Dias Úteis</SelectItem>
+                                <SelectItem value="sabados">Sábados</SelectItem>
+                                <SelectItem value="domingos">Domingos/Feriados</SelectItem>
                               </SelectContent>
                             </Select>
                           </div>
-                          <div className="space-y-2">
-                            <Label>Observação VIA (opcional)</Label>
-                            <Input
-                              value={scheduleForm.obs}
-                              onChange={(e) =>
-                                setScheduleForm({ ...scheduleForm, obs: e.target.value })
-                              }
-                              placeholder="Via Vila Resende"
-                            />
-                          </div>
                         </div>
-                        <DialogFooter>
-                          <Button
-                            onClick={editingSchedule ? handleUpdateSchedule : handleCreateSchedule}
+                        <div className="space-y-2">
+                          <Label>Ponto de Partida</Label>
+                          <Select
+                            value={scheduleForm.direction}
+                            onValueChange={(v) =>
+                              setScheduleForm({ ...scheduleForm, direction: v })
+                            }
                           >
-                            {editingSchedule ? "Salvar" : "Criar"}
-                          </Button>
-                        </DialogFooter>
-                      </DialogContent>
-                    </Dialog>
-                  </>
+                            <SelectTrigger>
+                              <SelectValue placeholder="Selecione o ponto" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {selectedLine?.directions.map((d) => (
+                                <SelectItem key={d} value={d}>
+                                  {d}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-2">
+                          <Label>Observação VIA (opcional)</Label>
+                          <Input
+                            value={scheduleForm.obs}
+                            onChange={(e) =>
+                              setScheduleForm({ ...scheduleForm, obs: e.target.value })
+                            }
+                            placeholder="Via Vila Resende"
+                          />
+                        </div>
+                      </div>
+                      <DialogFooter>
+                        <Button
+                          onClick={editingSchedule ? handleUpdateSchedule : handleCreateSchedule}
+                        >
+                          {editingSchedule ? "Salvar" : "Criar"}
+                        </Button>
+                      </DialogFooter>
+                    </DialogContent>
+                  </Dialog>
                 )}
               </div>
 
@@ -677,12 +719,6 @@ const Admin = () => {
               )}
             </CardContent>
           </Card>
-        </div>
-
-        <div className="mt-6 grid gap-6">
-          <SondaCredentialsCard />
-          <ScheduledChangesCard />
-          <SpecialDatesCard />
         </div>
       </div>
     </div>

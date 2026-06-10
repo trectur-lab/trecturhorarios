@@ -9,6 +9,8 @@ export interface BusLine {
   via: string | null;
   cor: string;
   directions: string[];
+  sonda_codigo_veiculo?: string | null;
+  sonda_id_linha?: string | null;
 }
 
 export interface BusSchedule {
@@ -161,15 +163,26 @@ export const useBusLinesAdmin = () => {
   };
 
   const updateSchedule = async (id: string, updates: Partial<BusSchedule>) => {
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from("bus_schedules")
       .update(updates)
-      .eq("id", id);
+      .eq("id", id)
+      .select();
 
     if (error) {
       toast({
         title: "Erro ao atualizar horário",
         description: error.message,
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    if (!data || data.length === 0) {
+      toast({
+        title: "Não foi possível salvar",
+        description:
+          "Nenhuma alteração foi gravada. Sua sessão de admin pode ter expirado — faça login novamente.",
         variant: "destructive",
       });
       return false;

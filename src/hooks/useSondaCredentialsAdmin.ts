@@ -1,66 +1,128 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { toast } from "sonner";
+import { useToast } from "@/hooks/use-toast";
 
-export interface SondaCredsView {
+export const DEFAULT_AUTH_URL =
+  "https://consultaviagem.m2mfrota.com.br/AutenticarUsuario";
+export const DEFAULT_DATA_URL =
+  "https://zn5.sinopticoplus.com/servico-dados/api/v1/obterPosicaoVeiculo";
+
+export interface SondaCredentials {
   id: string;
-  username: string;
   auth_url: string;
-  position_url: string;
-  dashboard_url: string | null;
+  data_url: string;
+  usuario: string;
+  senha: string;
+  is_active: boolean;
   updated_at: string;
 }
 
-export interface SondaCredsUpsert {
-  username: string;
-  password: string;
-  auth_url: string;
-  position_url: string;
-  dashboard_url?: string;
-}
-
 export function useSondaCredentialsAdmin() {
-  const [creds, setCreds] = useState<SondaCredsView | null>(null);
-  const [loading, setLoading] = useState(false);
+  const [credentials, setCredentials] = useState<SondaCredentials | null>(null);
+  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const { toast } = useToast();
 
-  const fetchCreds = useCallback(async () => {
+  const fetch = async () => {
     setLoading(true);
-    try {
-      const { data, error } = await supabase.functions.invoke("sonda-credentials", {
-        method: "GET",
-      });
-      if (error) throw error;
-      setCreds(data?.credentials ?? null);
-    } catch (e: any) {
-      toast.error(e?.message ?? "Erro ao carregar credenciais");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    const { data, error } = await supabase
+      .from("sonda_credentials")
+      .select("*")
+      .order("updated_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
 
-  const save = async (input: SondaCredsUpsert) => {
-    setSaving(true);
-    try {
-      const { error } = await supabase.functions.invoke("sonda-credentials", {
-        method: "POST",
-        body: input,
+    if (error) {
+      toast({
+        title: "Erro ao carregar credenciais SONDA",
+        description: error.message,
+        variant: "destructive",
       });
-      if (error) throw error;
-      toast.success("Credenciais SONDA salvas");
-      await fetchCreds();
-      return true;
-    } catch (e: any) {
-      toast.error(e?.message ?? "Erro ao salvar credenciais");
+      setLoading(false);
+      return;
+    }
+    setCredentials(data as SondaCredentials | null);
+    setLoading(false);
+  };
+
+  const save = async (values: {
+    auth_url: string;
+    data_url: string;
+    usuario: string;
+    senha: string;
+  }) => {
+    setSaving(true);
+    let error;
+    if (credentials) {
+      ({ error } = await supabase
+        .from("sonda_credentials")
+        .update({ ...values, is_active: true })
+        .eq("id", credentials.id));
+    } else {
+      ({ error } = await supabase
+        .from("sonda_credentials")
+        .insert({ ...values, is_active: true }));
+    }
+    setSaving(false);
+
+    if (error) {
+      toast({
+        title: "Erro ao salvar credenciais",
+        description: error.message,
+        variant: "destructive",
+      });
       return false;
+    }
+    toast({ title: "Credenciais SONDA salvas com sucesso." });
+    await fetch();
+    return true;
+  };
+
+  const testConnection = async () => {
+    setTesting(true);
+    try {
+      const { data, error } = await supabase.functions.invoke(
+        "sonda-vehicle-position",
+        { body: { ping: true } },
+      );
+      if (error) {
+        toast({
+          title: "Falha no teste",
+          description: error.message,
+          variant: "destructive",
+        });
+        return false;
+      }
+      if (data?.error) {
+        toast({
+          title: "Falha no teste",
+          description: data.error,
+          variant: "destructive",
+        });
+        return false;
+      }
+      toast({
+        title: "Conexão OK",
+        description: data?.message ?? "Login SONDA bem-sucedido.",
+      });
+      return true;
     } finally {
-      setSaving(false);
+      setTesting(false);
     }
   };
 
   useEffect(() => {
-    fetchCreds();
-  }, [fetchCreds]);
+    fetch();
+  }, []);
 
-  return { creds, loading, saving, save, refresh: fetchCreds };
+  return {
+    credentials,
+    loading,
+    saving,
+    testing,
+    save,
+    testConnection,
+    refetch: fetch,
+  };
 }
