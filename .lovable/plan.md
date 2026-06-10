@@ -1,43 +1,17 @@
-## Plano: sincronizar o projeto com o ZIP enviado
+## Objetivo
+Mover o botão de tela cheia para **dentro do mapa**, no canto superior direito, com visual mais polido.
 
-Objetivo: deixar o código do projeto idêntico ao `trectur-main.zip` anexado, preservando configurações geradas automaticamente e o histórico de migrações já aplicado no banco.
+## Mudanças (`src/components/BusSchedule/LineMap.tsx`)
 
-### O que será sobrescrito/criado a partir do ZIP
+- **Remover** o botão de tela cheia do cabeçalho do card (manter apenas o de atualizar).
+- **Adicionar** um botão flutuante sobreposto ao mapa:
+  - Posição: `absolute top-3 right-3 z-[400]` (acima das tiles do Leaflet, abaixo de popups).
+  - Visual: quadrado ~36px, `bg-background/95 backdrop-blur-sm`, `border border-border`, `rounded-lg`, `shadow-lg`, hover `bg-background` + leve `scale-105`, transição suave.
+  - Ícone `Maximize2` (modo normal) / `Minimize2` (tela cheia), `w-4 h-4`, cor `text-foreground`.
+  - `aria-label` e `title` dinâmicos ("Tela cheia" / "Fechar tela cheia (Esc)").
+- Em fullscreen, o botão continua no mesmo canto superior direito do mapa expandido (já funciona porque o container do mapa é `relative`).
+- Sem mudanças em hooks, lógica de veículos ou backend.
 
-Todos os arquivos comuns serão substituídos pela versão do ZIP, incluindo (entre outros):
-
-- `src/components/BusSchedule/LineMap.tsx` e demais componentes
-- `src/pages/*`, `src/hooks/*`, `src/data/*`, `src/index.css`, `src/App.tsx`
-- `tailwind.config.ts`, `vite.config.ts`, `index.html`, `package.json`
-- `supabase/functions/sonda-vehicle-position/index.ts`
-
-Arquivos novos que serão adicionados:
-
-- `src/components/Admin/ScheduledChangesCard.tsx`
-- `src/components/Admin/SondaCredentialsCard.tsx`
-- `src/components/Admin/SpecialDatesCard.tsx`
-- `src/hooks/useLineRoute.ts`
-- `src/hooks/useVehiclePosition.ts`
-- `supabase/functions/sonda-line-route/index.ts`
-
-Observação sobre maiúsculas/minúsculas: o ZIP usa a pasta `src/components/Admin/` (com A maiúsculo) e o projeto atual usa `src/components/admin/` (com a minúsculo). Vou remover a pasta minúscula e criar a maiúscula, para bater exatamente com os imports do ZIP em `src/pages/Admin.tsx`.
-
-### O que será removido (existe hoje, não existe no ZIP)
-
-- `supabase/functions/sonda-credentials/` (função não presente no ZIP)
-- `src/components/admin/` (substituído por `Admin/`)
-- `public/.htaccess`
-- `.github/workflows/deploy.yml`
-
-### O que NÃO será tocado (preservado intencionalmente)
-
-- `.env`, `src/integrations/supabase/client.ts`, `src/integrations/supabase/types.ts`, `supabase/config.toml` — arquivos auto-gerados pela plataforma.
-- `supabase/migrations/*` existentes (histórico já aplicado no banco). As migrações que estão apenas no ZIP (datadas de abril/maio) já são anteriores ao histórico atual e não serão re-aplicadas; mantemos só as do banco atual para evitar conflitos.
-- `.git`, `supabase/.temp/` e demais metadados internos.
-
-### Validação após aplicar
-
-- Conferir o build sem erros TypeScript.
-- Abrir a preview e validar a tela do mapa (tela cheia, centralização e marcadores) que foi o foco das últimas correções.
-
-Se confirmar, prossigo trocando para modo de execução para sincronizar os arquivos.
+## Detalhes técnicos
+- Tokens semânticos (`bg-background`, `border-border`, `text-foreground`) — sem cores hardcoded.
+- z-index escolhido para não conflitar com controles do Leaflet (zoom fica `top-left` por padrão, então sem sobreposição).
