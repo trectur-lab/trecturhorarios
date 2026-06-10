@@ -100,13 +100,18 @@ export type Database = {
           bus_line_id: number
           change_type: string
           created_at: string
+          created_by: string | null
           day_type: string | null
           direction: string | null
+          effective_date: string | null
+          error: string | null
           id: string
           new_hora: string | null
           new_obs: string | null
+          operation: string | null
           payload: Json | null
           scheduled_for: string
+          status: string
           target_hora: string | null
           updated_at: string
         }
@@ -115,13 +120,18 @@ export type Database = {
           bus_line_id: number
           change_type: string
           created_at?: string
+          created_by?: string | null
           day_type?: string | null
           direction?: string | null
+          effective_date?: string | null
+          error?: string | null
           id?: string
           new_hora?: string | null
           new_obs?: string | null
+          operation?: string | null
           payload?: Json | null
           scheduled_for: string
+          status?: string
           target_hora?: string | null
           updated_at?: string
         }
@@ -130,13 +140,18 @@ export type Database = {
           bus_line_id?: number
           change_type?: string
           created_at?: string
+          created_by?: string | null
           day_type?: string | null
           direction?: string | null
+          effective_date?: string | null
+          error?: string | null
           id?: string
           new_hora?: string | null
           new_obs?: string | null
+          operation?: string | null
           payload?: Json | null
           scheduled_for?: string
+          status?: string
           target_hora?: string | null
           updated_at?: string
         }
@@ -155,31 +170,43 @@ export type Database = {
           auth_url: string
           created_at: string
           dashboard_url: string
+          data_url: string | null
           id: string
+          is_active: boolean
           password: string
           position_url: string
+          senha: string | null
           updated_at: string
           username: string
+          usuario: string | null
         }
         Insert: {
           auth_url?: string
           created_at?: string
           dashboard_url?: string
+          data_url?: string | null
           id?: string
+          is_active?: boolean
           password: string
           position_url?: string
+          senha?: string | null
           updated_at?: string
           username: string
+          usuario?: string | null
         }
         Update: {
           auth_url?: string
           created_at?: string
           dashboard_url?: string
+          data_url?: string | null
           id?: string
+          is_active?: boolean
           password?: string
           position_url?: string
+          senha?: string | null
           updated_at?: string
           username?: string
+          usuario?: string | null
         }
         Relationships: []
       }
@@ -187,6 +214,7 @@ export type Database = {
         Row: {
           bus_line_id: number
           created_at: string
+          day_type: string | null
           id: string
           override: string
           special_date_id: string
@@ -194,6 +222,7 @@ export type Database = {
         Insert: {
           bus_line_id: number
           created_at?: string
+          day_type?: string | null
           id?: string
           override: string
           special_date_id: string
@@ -201,6 +230,7 @@ export type Database = {
         Update: {
           bus_line_id?: number
           created_at?: string
+          day_type?: string | null
           id?: string
           override?: string
           special_date_id?: string
@@ -275,6 +305,8 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      apply_due_scheduled_changes: { Args: never; Returns: number }
+      apply_scheduled_change: { Args: { _id: string }; Returns: boolean }
       has_role: {
         Args: {
           _role: Database["public"]["Enums"]["app_role"]
