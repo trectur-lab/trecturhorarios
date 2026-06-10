@@ -98,7 +98,7 @@ export type Database = {
         Row: {
           applied_at: string | null
           bus_line_id: number
-          change_type: string
+          change_type: string | null
           created_at: string
           created_by: string | null
           day_type: string | null
@@ -118,7 +118,7 @@ export type Database = {
         Insert: {
           applied_at?: string | null
           bus_line_id: number
-          change_type: string
+          change_type?: string | null
           created_at?: string
           created_by?: string | null
           day_type?: string | null
@@ -138,7 +138,7 @@ export type Database = {
         Update: {
           applied_at?: string | null
           bus_line_id?: number
-          change_type?: string
+          change_type?: string | null
           created_at?: string
           created_by?: string | null
           day_type?: string | null
@@ -173,11 +173,11 @@ export type Database = {
           data_url: string | null
           id: string
           is_active: boolean
-          password: string
+          password: string | null
           position_url: string
           senha: string | null
           updated_at: string
-          username: string
+          username: string | null
           usuario: string | null
         }
         Insert: {
@@ -187,11 +187,11 @@ export type Database = {
           data_url?: string | null
           id?: string
           is_active?: boolean
-          password: string
+          password?: string | null
           position_url?: string
           senha?: string | null
           updated_at?: string
-          username: string
+          username?: string | null
           usuario?: string | null
         }
         Update: {
@@ -201,11 +201,11 @@ export type Database = {
           data_url?: string | null
           id?: string
           is_active?: boolean
-          password?: string
+          password?: string | null
           position_url?: string
           senha?: string | null
           updated_at?: string
-          username?: string
+          username?: string | null
           usuario?: string | null
         }
         Relationships: []
@@ -216,7 +216,7 @@ export type Database = {
           created_at: string
           day_type: string | null
           id: string
-          override: string
+          override: string | null
           special_date_id: string
         }
         Insert: {
@@ -224,7 +224,7 @@ export type Database = {
           created_at?: string
           day_type?: string | null
           id?: string
-          override: string
+          override?: string | null
           special_date_id: string
         }
         Update: {
@@ -232,7 +232,7 @@ export type Database = {
           created_at?: string
           day_type?: string | null
           id?: string
-          override?: string
+          override?: string | null
           special_date_id?: string
         }
         Relationships: [
