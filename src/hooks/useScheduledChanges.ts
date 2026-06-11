@@ -51,6 +51,7 @@ export const useScheduledChanges = () => {
     const { data: userData } = await supabase.auth.getUser();
     const { error } = await supabase.from("scheduled_schedule_changes").insert({
       ...input,
+      scheduled_for: input.effective_date,
       created_by: userData.user?.id ?? null,
     });
     if (error) {
