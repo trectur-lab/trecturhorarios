@@ -1,49 +1,36 @@
-## Resultado da análise dos dois projetos
+## Problema
 
-Comparei arquivo por arquivo (hash MD5) o conteúdo do ZIP `trectur-main` com o projeto atual desta plataforma. **A grande maioria do código já é idêntica** — todos os 88 arquivos em `src/` batem byte a byte, incluindo:
+Ao abrir a pré-visualização em nova aba, aparece a versão **antiga** do app (de antes da atualização vinda do ZIP). A causa é o **Service Worker do PWA** (`vite-plugin-pwa`): o navegador já tinha registrado um SW da versão antiga e ele continua servindo arquivos do cache até que todas as abas sejam fechadas — mesmo com `registerType: "autoUpdate"`.
 
-- Mapa de linha (`LineMap.tsx`, `useLineRoute.ts`)
-- Agenda de troca de horários (`ScheduledChangesCard.tsx`, `useScheduledChanges.ts`)
-- Datas especiais (`SpecialDatesCard.tsx`, `useSpecialDates.ts`)
-- Painel admin, autenticação, PWA, etc.
+O backend está saudável: a edge function `sonda-vehicle-position` está respondendo `200` com 2 veículos da Linha 01 a cada 30 s (confirmado nos network requests). O problema é puramente de cache do navegador.
 
-Ou seja, o app aqui já tem todas as funcionalidades do ZIP. As diferenças reais são pontuais:
+## Correção (1 arquivo)
 
-| Arquivo | Situação |
-|---|---|
-| `supabase/functions/sonda-vehicle-position/index.ts` | **Diverge** (única diferença real de código) |
-| `.env`, `src/integrations/supabase/types.ts`, `supabase/config.toml` | Auto-gerados pela plataforma, não devem ser sobrescritos |
-| 7 migrations de junho/2026 | Existem só aqui; foram criadas para suportar exatamente o código do ZIP (coluna `sonda_codigo_veiculo`, `day_type` em overrides, NOT NULL relaxado etc.) — **devem ser mantidas** |
+Atualizar `vite.config.ts` para que o novo SW assuma o controle imediatamente e descarte caches antigos:
 
-## O que vou fazer
-
-### 1. Restaurar `supabase/functions/sonda-vehicle-position/index.ts` para a versão do ZIP
-
-A diferença está em 1 trecho. A versão do ZIP usa as colunas `usuario / senha / data_url / is_active` em `sonda_credentials`, que **já existem no banco** (verifiquei em `types.ts`). Portanto a versão do ZIP funcionará sem necessidade de nova migration.
-
-```text
-sonda_credentials (colunas atuais no banco):
-  auth_url, data_url, usuario, senha, is_active   ← usadas pelo ZIP ✓
-  position_url, username, password                ← legado, mantido por compatibilidade
+```ts
+workbox: {
+  globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
+  cleanupOutdatedCaches: true,   // apaga caches de versões anteriores
+  clientsClaim: true,            // novo SW controla as abas abertas
+  skipWaiting: true,             // não espera fechar as abas para ativar
+},
+devOptions: {
+  enabled: false,                // desativa SW no dev/preview do Lovable
+},
 ```
 
-### 2. Redeployar a edge function
+## O que isso resolve
 
-Após substituir o arquivo, faço `deploy` da `sonda-vehicle-position` para o ambiente aplicar a versão do ZIP.
+- Abrir a pré-visualização em nova aba passa a entregar sempre a versão mais nova.
+- Usuários que já têm o PWA instalado vão receber a atualização automaticamente no próximo carregamento, sem precisar desinstalar.
+- No ambiente do preview do Lovable, o SW deixa de interferir.
 
-### 3. Não tocar em mais nada
+## Ação necessária do usuário (uma vez)
 
-- **Não** alterar `src/integrations/supabase/types.ts` (auto-gerado).
-- **Não** alterar `.env` nem `supabase/config.toml` (gerenciados pela plataforma).
-- **Não** apagar migrations de junho — elas são exatamente o que dá suporte ao código do ZIP (campos SONDA, `day_type` em overrides, ajustes de RLS/GRANT).
-- **Não** mexer em código de mapa, agenda ou datas especiais — já está idêntico ao ZIP.
+Como a aba atual ainda está controlada pelo SW antigo, **uma** das duas ações abaixo é necessária **uma única vez** para a correção entrar em vigor — depois disso o problema não volta:
 
-## Por que não preciso “despejar” todo o ZIP por cima
+1. **Hard reload** na aba do preview: `Ctrl+Shift+R` (Windows/Linux) ou `Cmd+Shift+R` (Mac); **ou**
+2. Abrir DevTools → aba **Application** → **Service Workers** → **Unregister**, e recarregar.
 
-Despejar o ZIP inteiro por cima do projeto **não mudaria nada visível** (os outros 87 arquivos `src/` têm hash idêntico) e ainda removeria as migrations de junho, o que quebraria o banco (faltariam colunas que o código do ZIP usa). A operação correta é o ajuste cirúrgico acima.
-
-## Checagem final
-
-Depois de aplicar:
-- Verificar que a edge function `sonda-vehicle-position` responde ao `ping` sem 500.
-- Confirmar no preview que mapa, painel de horários agendados e datas especiais continuam funcionando.
+Depois disso, qualquer nova aba já abrirá direto na versão atualizada.
