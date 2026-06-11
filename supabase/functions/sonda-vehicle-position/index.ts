@@ -34,8 +34,7 @@ async function getCreds(): Promise<SondaCreds | null> {
   );
   const { data, error } = await supabase
     .from("sonda_credentials")
-    .select("auth_url, data_url, usuario, senha")
-    .eq("is_active", true)
+    .select("auth_url, data_url, position_url, usuario, senha, username, password")
     .order("updated_at", { ascending: false })
     .limit(1)
     .maybeSingle();
@@ -44,12 +43,14 @@ async function getCreds(): Promise<SondaCreds | null> {
     console.error("[sonda] read creds error:", error.message);
     return null;
   }
-  if (!data?.usuario || !data?.senha) return null;
+  const usuario = data?.usuario || data?.username;
+  const senha = data?.senha || data?.password;
+  if (!usuario || !senha) return null;
   return {
     auth_url: data.auth_url || DEFAULT_AUTH_URL,
-    data_url: data.data_url || DEFAULT_DATA_URL,
-    usuario: data.usuario,
-    senha: data.senha,
+    data_url: data.data_url || data.position_url || DEFAULT_DATA_URL,
+    usuario,
+    senha,
   };
 }
 
