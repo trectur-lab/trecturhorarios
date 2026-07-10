@@ -396,10 +396,26 @@ export const ScheduledChangesCard = ({ busLines }: Props) => {
                         <Pencil className="w-3 h-3 mr-1" />
                         Editar
                       </Button>
-                      <Button size="sm" variant="outline" onClick={() => applyNow(it.id)}>
-                        <Play className="w-3 h-3 mr-1" />
-                        Aplicar agora
-                      </Button>
+                      <AlertDialog>
+                        <AlertDialogTrigger asChild>
+                          <Button size="sm" variant="outline">
+                            <Play className="w-3 h-3 mr-1" />
+                            Aplicar agora
+                          </Button>
+                        </AlertDialogTrigger>
+                        <AlertDialogContent>
+                          <AlertDialogHeader>
+                            <AlertDialogTitle>Aplicar antes da data prevista?</AlertDialogTitle>
+                            <AlertDialogDescription>
+                              Isto substitui os horários da linha imediatamente, ignorando a data de vigência ({it.effective_date}). O servidor só permitirá se a data já tiver chegado no horário de Brasília.
+                            </AlertDialogDescription>
+                          </AlertDialogHeader>
+                          <AlertDialogFooter>
+                            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                            <AlertDialogAction onClick={() => applyNow(it.id)}>Aplicar</AlertDialogAction>
+                          </AlertDialogFooter>
+                        </AlertDialogContent>
+                      </AlertDialog>
                       <Button size="sm" variant="ghost" onClick={() => cancel(it.id)}>
                         <X className="w-3 h-3 mr-1" />
                         Cancelar
