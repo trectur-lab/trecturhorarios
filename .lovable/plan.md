@@ -1,36 +1,48 @@
-## Problema
+## Diagnóstico
 
-Ao abrir a pré-visualização em nova aba, aparece a versão **antiga** do app (de antes da atualização vinda do ZIP). A causa é o **Service Worker do PWA** (`vite-plugin-pwa`): o navegador já tinha registrado um SW da versão antiga e ele continua servindo arquivos do cache até que todas as abas sejam fechadas — mesmo com `registerType: "autoUpdate"`.
+Investigando o código e o banco, encontrei dois problemas graves no fluxo de "Alterações Agendadas":
 
-O backend está saudável: a edge function `sonda-vehicle-position` está respondendo `200` com 2 veículos da Linha 01 a cada 30 s (confirmado nos network requests). O problema é puramente de cache do navegador.
+1. **A função `apply_scheduled_change` do banco não aplica a mudança de fato.** Ela apenas marca o registro como `applied`, sem tocar em `bus_schedules`. O mesmo vale para `apply_due_scheduled_changes`. Ou seja, hoje o agendamento nunca substitui os horários reais — a menos que exista (ou tenha existido) alguma versão que aplicava direto. Isso explica por que o comportamento ficou imprevisível.
+2. **Não há proteção de data.** `apply_scheduled_change` aceita aplicar mesmo antes da data de vigência, e `apply_due_scheduled_changes` compara com `current_date` (UTC) — em Brasília (UTC-3), das 21h em diante a "data de hoje" no banco já é a de amanhã, então um agendamento marcado para amanhã pode ser tratado como vencido no mesmo dia.
+3. **Não existe rotina automática** rodando a aplicação diária, então nada garante que a substituição aconteça exatamente na data prevista.
 
-## Correção (1 arquivo)
+## O que vou mudar
 
-Atualizar `vite.config.ts` para que o novo SW assuma o controle imediatamente e descarte caches antigos:
+### 1. Corrigir a função `apply_scheduled_change` (banco)
+Ela passará a:
+- Ler o registro pendente.
+- Comparar a `effective_date` com a data atual **em `America/Sao_Paulo`**: `(now() AT TIME ZONE 'America/Sao_Paulo')::date`.
+- Se ainda não chegou a data, retornar `false` e **não** mexer em `bus_schedules`. É o guard-rail que impede a mudança instantânea que você viu.
+- Se chegou, executar `replace_all`: deletar todos os `bus_schedules` daquela `bus_line_id` + `day_type` + `direction` e inserir os itens do `payload->'items'` (campos `hora`, `obs`).
+- Marcar o registro como `applied` + `applied_at = now()`.
+- Em caso de erro, marcar `status='failed'` e gravar mensagem em `error`.
 
-```ts
-workbox: {
-  globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2}"],
-  cleanupOutdatedCaches: true,   // apaga caches de versões anteriores
-  clientsClaim: true,            // novo SW controla as abas abertas
-  skipWaiting: true,             // não espera fechar as abas para ativar
-},
-devOptions: {
-  enabled: false,                // desativa SW no dev/preview do Lovable
-},
-```
+### 2. Corrigir `apply_due_scheduled_changes` (banco)
+- Selecionar todos os `pending` com `effective_date <= (now() AT TIME ZONE 'America/Sao_Paulo')::date`.
+- Reaproveitar a lógica de `apply_scheduled_change` para cada um.
+- Retornar quantos foram aplicados.
 
-## O que isso resolve
+### 3. Job diário automático (pg_cron)
+- Habilitar `pg_cron` (se ainda não estiver) e criar job `apply-scheduled-changes-daily` rodando **todo dia às 03:05 UTC** (= 00:05 em Brasília) que chama `apply_due_scheduled_changes()`.
+- Assim o público vê a mudança já na manhã da data prevista, sem depender de ninguém abrir o painel.
 
-- Abrir a pré-visualização em nova aba passa a entregar sempre a versão mais nova.
-- Usuários que já têm o PWA instalado vão receber a atualização automaticamente no próximo carregamento, sem precisar desinstalar.
-- No ambiente do preview do Lovable, o SW deixa de interferir.
+### 4. Ajustes de UI no card "Alterações Agendadas"
+- **Botão "Aplicar agora"**: adicionar `AlertDialog` de confirmação explicando "isso ignora a data de vigência e aplica imediatamente".
+- **Botão "Aplicar vencidas"**: manter, mas fica claro que só age em agendamentos cuja data já passou (em Brasília).
+- **Mensagem de erro melhor**: quando a RPC retornar `false` por causa da data futura, o toast dirá "Aguardando a data de vigência (Brasília)" em vez do genérico atual.
+- **Nenhuma chamada automática** a `applyNow`/`applyAllDue` fora do clique do usuário (já é o caso, mantido).
 
-## Ação necessária do usuário (uma vez)
+### 5. Validação
+- Após aplicar, rodar um teste manual: criar um agendamento para amanhã, conferir que `bus_schedules` **não** muda, chamar `apply_scheduled_change` e confirmar que retorna `false` e nada mudou. Depois criar um com data de hoje, aplicar e confirmar substituição correta.
 
-Como a aba atual ainda está controlada pelo SW antigo, **uma** das duas ações abaixo é necessária **uma única vez** para a correção entrar em vigor — depois disso o problema não volta:
+## Detalhes técnicos
 
-1. **Hard reload** na aba do preview: `Ctrl+Shift+R` (Windows/Linux) ou `Cmd+Shift+R` (Mac); **ou**
-2. Abrir DevTools → aba **Application** → **Service Workers** → **Unregister**, e recarregar.
+- Timezone: sempre `(now() AT TIME ZONE 'America/Sao_Paulo')::date` para comparar com `effective_date` (que é `date`, sem TZ).
+- `SECURITY DEFINER` mantido nas funções e `search_path = public` já configurado.
+- Sem alteração de schema, apenas `CREATE OR REPLACE FUNCTION` das duas funções + `SELECT cron.schedule(...)` para o job (via ferramenta de insert, não migration, porque contém URL/anon do projeto? — não, aqui é SQL puro chamando função interna, então pode ir na migration).
+- Sem mudanças no cliente Supabase gerado. Só editar `useScheduledChanges.ts` (mensagem do toast) e `ScheduledChangesCard.tsx` (confirmação do "Aplicar agora").
 
-Depois disso, qualquer nova aba já abrirá direto na versão atualizada.
+## Fora do escopo
+
+- Não vou mexer no CRUD imediato de `bus_schedules` (edição direta pelo painel continua igual — muda na hora, como sempre foi).
+- Não vou alterar a estrutura da tabela `scheduled_schedule_changes` (colunas legadas permanecem).
