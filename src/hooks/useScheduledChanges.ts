@@ -113,7 +113,11 @@ export const useScheduledChanges = () => {
     if (data === true) {
       toast({ title: "Alteração aplicada!" });
     } else {
-      toast({ title: "Não foi possível aplicar", description: "Verifique o status do agendamento.", variant: "destructive" });
+      toast({
+        title: "Aguardando a data de vigência",
+        description: "A alteração só será aplicada na data prevista (horário de Brasília).",
+        variant: "destructive",
+      });
     }
     await fetchAll();
     return data === true;
