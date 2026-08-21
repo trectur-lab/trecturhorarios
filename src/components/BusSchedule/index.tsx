@@ -15,7 +15,21 @@ export const BusSchedule = () => {
   const [selectedDirection, setSelectedDirection] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
-  const { lines, schedulesMap, specialDates, loading } = useBusSchedulesPublic();
+  const { lines, schedulesMap, specialDates, loading, isRefreshing, lastUpdated, refreshData } =
+    useBusSchedulesPublic();
+
+  const lastUpdatedMs = lastUpdated ? new Date(lastUpdated).getTime() : null;
+  const isStale = lastUpdatedMs != null && currentTime.getTime() - lastUpdatedMs > 15 * 60 * 1000;
+  const formatRelative = (iso: string) => {
+    const diffMin = Math.max(0, Math.round((currentTime.getTime() - new Date(iso).getTime()) / 60000));
+    if (diffMin < 1) return 'agora mesmo';
+    if (diffMin < 60) return `há ${diffMin} min`;
+    const h = Math.floor(diffMin / 60);
+    if (h < 24) return `há ${h} h`;
+    const d = Math.floor(h / 24);
+    return `há ${d} dia${d > 1 ? 's' : ''}`;
+  };
+
 
   // Set initial selection when lines load
   useEffect(() => {
