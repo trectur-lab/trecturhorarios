@@ -1,48 +1,30 @@
-## Diagnóstico
+# Horário 06:15 não aparece para o usuário
 
-Investigando o código e o banco, encontrei dois problemas graves no fluxo de "Alterações Agendadas":
+## Diagnóstico (verificado)
 
-1. **A função `apply_scheduled_change` do banco não aplica a mudança de fato.** Ela apenas marca o registro como `applied`, sem tocar em `bus_schedules`. O mesmo vale para `apply_due_scheduled_changes`. Ou seja, hoje o agendamento nunca substitui os horários reais — a menos que exista (ou tenha existido) alguma versão que aplicava direto. Isso explica por que o comportamento ficou imprevisível.
-2. **Não há proteção de data.** `apply_scheduled_change` aceita aplicar mesmo antes da data de vigência, e `apply_due_scheduled_changes` compara com `current_date` (UTC) — em Brasília (UTC-3), das 21h em diante a "data de hoje" no banco já é a de amanhã, então um agendamento marcado para amanhã pode ser tratado como vencido no mesmo dia.
-3. **Não existe rotina automática** rodando a aplicação diária, então nada garante que a substituição aconteça exatamente na data prevista.
+- No banco, a Linha 01 (Jardim Paraíso / N.Sra. Aparecida), Dias Úteis, sentido **Jardim Paraíso**, já está com **06:15** (alterado em 21/08 às 13:45 UTC). Não existe mais nenhum 06:20 nesse conjunto.
+- Abrindo o app em um navegador limpo, a grade exibe **06:15** corretamente.
+- Conclusão: a alteração foi salva e o app está certo. O 06:20 que você vê vem do **cache local do próprio dispositivo** (`localStorage` chave `trectur_bus_data`, usado para funcionamento offline no PWA).
 
-## O que vou mudar
+Por que o cache "gruda": o app carrega o cache na abertura e só busca dados novos **uma vez, no primeiro carregamento**. Se o app estiver instalado como PWA e apenas for retomado do segundo plano (sem recarregar de fato), ou se a busca falhar naquele instante, ele continua exibindo o cache antigo por tempo indeterminado — sem nenhuma validade nem aviso.
 
-### 1. Corrigir a função `apply_scheduled_change` (banco)
-Ela passará a:
-- Ler o registro pendente.
-- Comparar a `effective_date` com a data atual **em `America/Sao_Paulo`**: `(now() AT TIME ZONE 'America/Sao_Paulo')::date`.
-- Se ainda não chegou a data, retornar `false` e **não** mexer em `bus_schedules`. É o guard-rail que impede a mudança instantânea que você viu.
-- Se chegou, executar `replace_all`: deletar todos os `bus_schedules` daquela `bus_line_id` + `day_type` + `direction` e inserir os itens do `payload->'items'` (campos `hora`, `obs`).
-- Marcar o registro como `applied` + `applied_at = now()`.
-- Em caso de erro, marcar `status='failed'` e gravar mensagem em `error`.
+## Correção proposta
 
-### 2. Corrigir `apply_due_scheduled_changes` (banco)
-- Selecionar todos os `pending` com `effective_date <= (now() AT TIME ZONE 'America/Sao_Paulo')::date`.
-- Reaproveitar a lógica de `apply_scheduled_change` para cada um.
-- Retornar quantos foram aplicados.
+### 1. Revalidar dados ao voltar para o app (`src/hooks/useBusSchedulesPublic.ts`)
+- Buscar dados novos quando a aba/app volta a ficar visível (`visibilitychange`) e quando a conexão volta (`online`), respeitando um intervalo mínimo (ex.: 2 minutos) para não sobrecarregar.
+- Assim, o usuário de PWA passa a receber a atualização sem precisar fechar/reabrir o app.
 
-### 3. Job diário automático (pg_cron)
-- Habilitar `pg_cron` (se ainda não estiver) e criar job `apply-scheduled-changes-daily` rodando **todo dia às 03:05 UTC** (= 00:05 em Brasília) que chama `apply_due_scheduled_changes()`.
-- Assim o público vê a mudança já na manhã da data prevista, sem depender de ninguém abrir o painel.
+### 2. Validade e versão do cache
+- Gravar no cache uma versão (`CACHE_VERSION`) e o carimbo de tempo já existente.
+- Se o cache tiver versão diferente ou mais de 24 h, tratá-lo como "somente offline": ainda é exibido, mas o app força busca imediata no banco.
 
-### 4. Ajustes de UI no card "Alterações Agendadas"
-- **Botão "Aplicar agora"**: adicionar `AlertDialog` de confirmação explicando "isso ignora a data de vigência e aplica imediatamente".
-- **Botão "Aplicar vencidas"**: manter, mas fica claro que só age em agendamentos cuja data já passou (em Brasília).
-- **Mensagem de erro melhor**: quando a RPC retornar `false` por causa da data futura, o toast dirá "Aguardando a data de vigência (Brasília)" em vez do genérico atual.
-- **Nenhuma chamada automática** a `applyNow`/`applyAllDue` fora do clique do usuário (já é o caso, mantido).
+### 3. Aviso visual de dados em cache
+- Quando o dado exibido vier de cache com mais de ~15 minutos, mostrar no cabeçalho um texto discreto tipo "Atualizado há X" com o botão de atualizar já existente em destaque, para o usuário saber que pode não estar vendo a última versão.
 
-### 5. Validação
-- Após aplicar, rodar um teste manual: criar um agendamento para amanhã, conferir que `bus_schedules` **não** muda, chamar `apply_scheduled_change` e confirmar que retorna `false` e nada mudou. Depois criar um com data de hoje, aplicar e confirmar substituição correta.
-
-## Detalhes técnicos
-
-- Timezone: sempre `(now() AT TIME ZONE 'America/Sao_Paulo')::date` para comparar com `effective_date` (que é `date`, sem TZ).
-- `SECURITY DEFINER` mantido nas funções e `search_path = public` já configurado.
-- Sem alteração de schema, apenas `CREATE OR REPLACE FUNCTION` das duas funções + `SELECT cron.schedule(...)` para o job (via ferramenta de insert, não migration, porque contém URL/anon do projeto? — não, aqui é SQL puro chamando função interna, então pode ir na migration).
-- Sem mudanças no cliente Supabase gerado. Só editar `useScheduledChanges.ts` (mensagem do toast) e `ScheduledChangesCard.tsx` (confirmação do "Aplicar agora").
+### 4. Ação imediata no seu aparelho
+- Toque no botão de atualizar do app (ou feche e reabra), que o 06:15 aparece. Depois das mudanças acima isso passa a ser automático.
 
 ## Fora do escopo
 
-- Não vou mexer no CRUD imediato de `bus_schedules` (edição direta pelo painel continua igual — muda na hora, como sempre foi).
-- Não vou alterar a estrutura da tabela `scheduled_schedule_changes` (colunas legadas permanecem).
+- Nenhuma mudança no banco, nas políticas de acesso ou no painel admin (o salvamento está funcionando corretamente).
+- Nenhuma mudança no mapa, nos agendamentos ou nas datas especiais.
