@@ -214,6 +214,8 @@ export function useBusSchedulesPublic() {
 
       // Load cache immediately
       const cached = loadCache();
+      const cacheAge = cached ? Date.now() - new Date(cached.cachedAt).getTime() : Infinity;
+      const cacheIsStale = cacheAge > CACHE_MAX_AGE_MS;
       if (cached) {
         applyData(cached);
       }
@@ -225,12 +227,15 @@ export function useBusSchedulesPublic() {
           if (fresh) {
             applyData(fresh);
             saveCache(fresh);
+            lastFetchRef.current = Date.now();
           }
         } catch (err) {
           console.error('Error fetching bus data:', err);
-          // If no cache, show error
+          // If no cache (or cache muito antigo), show error
           if (!cached) {
             toast.error('Erro ao carregar horários');
+          } else if (cacheIsStale) {
+            toast.error('Não foi possível atualizar. Exibindo dados salvos no aparelho.');
           }
         }
       } else if (!cached) {
@@ -242,6 +247,37 @@ export function useBusSchedulesPublic() {
 
     init();
   }, [fetchFromDB, applyData]);
+
+  // Silent revalidation (visibilitychange / online), throttled
+  const revalidate = useCallback(async () => {
+    if (!navigator.onLine) return;
+    if (Date.now() - lastFetchRef.current < REVALIDATE_MIN_INTERVAL_MS) return;
+    lastFetchRef.current = Date.now();
+    try {
+      const fresh = await fetchFromDB();
+      if (fresh) {
+        applyData(fresh);
+        saveCache(fresh);
+      }
+    } catch (err) {
+      console.error('Error revalidating bus data:', err);
+    }
+  }, [fetchFromDB, applyData]);
+
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') void revalidate();
+    };
+    const onOnline = () => void revalidate();
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onVisible);
+    window.addEventListener('online', onOnline);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onVisible);
+      window.removeEventListener('online', onOnline);
+    };
+  }, [revalidate]);
 
   // Manual refresh
   const refreshData = useCallback(async () => {
@@ -256,6 +292,7 @@ export function useBusSchedulesPublic() {
       if (fresh) {
         applyData(fresh);
         saveCache(fresh);
+        lastFetchRef.current = Date.now();
         toast.success('Dados atualizados com sucesso');
       }
     } catch (err) {
@@ -265,6 +302,7 @@ export function useBusSchedulesPublic() {
       setIsRefreshing(false);
     }
   }, [fetchFromDB, applyData]);
+
 
   return {
     lines,
