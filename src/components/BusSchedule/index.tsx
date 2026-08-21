@@ -15,7 +15,21 @@ export const BusSchedule = () => {
   const [selectedDirection, setSelectedDirection] = useState('');
   const [selectedDate, setSelectedDate] = useState(new Date().toISOString().split('T')[0]);
 
-  const { lines, schedulesMap, specialDates, loading } = useBusSchedulesPublic();
+  const { lines, schedulesMap, specialDates, loading, isRefreshing, lastUpdated, refreshData } =
+    useBusSchedulesPublic();
+
+  const lastUpdatedMs = lastUpdated ? new Date(lastUpdated).getTime() : null;
+  const isStale = lastUpdatedMs != null && currentTime.getTime() - lastUpdatedMs > 15 * 60 * 1000;
+  const formatRelative = (iso: string) => {
+    const diffMin = Math.max(0, Math.round((currentTime.getTime() - new Date(iso).getTime()) / 60000));
+    if (diffMin < 1) return 'agora mesmo';
+    if (diffMin < 60) return `há ${diffMin} min`;
+    const h = Math.floor(diffMin / 60);
+    if (h < 24) return `há ${h} h`;
+    const d = Math.floor(h / 24);
+    return `há ${d} dia${d > 1 ? 's' : ''}`;
+  };
+
 
   // Set initial selection when lines load
   useEffect(() => {
@@ -214,17 +228,29 @@ export const BusSchedule = () => {
 
         {/* Footer with Reload Button */}
         <footer className="text-center text-sm text-muted-foreground py-6 space-y-3">
-          <div className="flex items-center justify-center gap-3">
+          <div className="flex flex-col items-center justify-center gap-2">
             <button
-              onClick={() => window.location.reload()}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/80 border border-border text-foreground text-xs font-medium transition-colors"
+              onClick={() => refreshData()}
+              disabled={isRefreshing}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors disabled:opacity-60 ${
+                isStale
+                  ? 'bg-primary text-primary-foreground border-primary hover:bg-primary/90'
+                  : 'bg-secondary hover:bg-secondary/80 border-border text-foreground'
+              }`}
             >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Atualizar
+              <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+              {isRefreshing ? 'Atualizando...' : 'Atualizar'}
             </button>
+            {lastUpdated && (
+              <span className="text-xs">
+                Atualizado {formatRelative(lastUpdated)}
+                {isStale && ' — toque em Atualizar para ver a versão mais recente'}
+              </span>
+            )}
           </div>
           <p>Horários sujeitos a alterações</p>
         </footer>
+
       </main>
     </div>
   );
