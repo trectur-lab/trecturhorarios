@@ -76,6 +76,8 @@ export function useBusSchedulesPublic() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const lastFetchRef = useRef(0);
+
 
   // Online/offline monitoring
   useEffect(() => {
