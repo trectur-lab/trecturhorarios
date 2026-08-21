@@ -35,15 +35,25 @@ interface CachedData {
   }>;
   specialDates: SpecialDatesMap;
   cachedAt: string;
+  version?: number;
 }
 
 const CACHE_KEY = 'trectur_bus_data';
+const CACHE_VERSION = 2;
+const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24h -> cache considerado só para offline
+const REVALIDATE_MIN_INTERVAL_MS = 2 * 60 * 1000; // 2min entre revalidações automáticas
 
 function loadCache(): CachedData | null {
   try {
     const raw = localStorage.getItem(CACHE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw) as CachedData;
+    if (parsed?.version !== CACHE_VERSION) {
+      // Cache de versão antiga: descarta para não exibir dados desatualizados
+      localStorage.removeItem(CACHE_KEY);
+      return null;
+    }
+    return parsed;
   } catch {
     return null;
   }
@@ -51,11 +61,12 @@ function loadCache(): CachedData | null {
 
 function saveCache(data: CachedData) {
   try {
-    localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    localStorage.setItem(CACHE_KEY, JSON.stringify({ ...data, version: CACHE_VERSION }));
   } catch {
     // localStorage full or unavailable
   }
 }
+
 
 export function useBusSchedulesPublic() {
   const [lines, setLines] = useState<PublicBusLine[]>([]);
