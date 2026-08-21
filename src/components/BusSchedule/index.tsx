@@ -214,17 +214,29 @@ export const BusSchedule = () => {
 
         {/* Footer with Reload Button */}
         <footer className="text-center text-sm text-muted-foreground py-6 space-y-3">
-          <div className="flex items-center justify-center gap-3">
+          <div className="flex flex-col items-center justify-center gap-2">
             <button
-              onClick={() => window.location.reload()}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-secondary hover:bg-secondary/80 border border-border text-foreground text-xs font-medium transition-colors"
+              onClick={() => refreshData()}
+              disabled={isRefreshing}
+              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors disabled:opacity-60 ${
+                isStale
+                  ? 'bg-primary text-primary-foreground border-primary hover:bg-primary/90'
+                  : 'bg-secondary hover:bg-secondary/80 border-border text-foreground'
+              }`}
             >
-              <RefreshCw className="h-3.5 w-3.5" />
-              Atualizar
+              <RefreshCw className={`h-3.5 w-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
+              {isRefreshing ? 'Atualizando...' : 'Atualizar'}
             </button>
+            {lastUpdated && (
+              <span className="text-xs">
+                Atualizado {formatRelative(lastUpdated)}
+                {isStale && ' — toque em Atualizar para ver a versão mais recente'}
+              </span>
+            )}
           </div>
           <p>Horários sujeitos a alterações</p>
         </footer>
+
       </main>
     </div>
   );
