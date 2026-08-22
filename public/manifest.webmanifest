@@ -1,0 +1,17 @@
+{
+  "name": "Trectur - Horários de Ônibus",
+  "short_name": "Trectur",
+  "description": "Consulte os horários de ônibus urbano de Três Corações/MG",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1a1a2e",
+  "theme_color": "#dc2626",
+  "lang": "pt-BR",
+  "scope": "/",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
