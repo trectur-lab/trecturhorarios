@@ -39,9 +39,11 @@ interface CachedData {
 }
 
 const CACHE_KEY = 'trectur_bus_data';
-const CACHE_VERSION = 3;
-const CACHE_MAX_AGE_MS = 10 * 60 * 1000; // 10min -> cache considerado só para offline
-const REVALIDATE_MIN_INTERVAL_MS = 30 * 1000; // 30s entre revalidações automáticas
+const CACHE_VERSION = 4;
+const CACHE_MAX_AGE_MS = 10 * 60 * 1000; // cache é apenas fallback offline
+const REVALIDATE_MIN_INTERVAL_MS = 15 * 1000; // throttle só para revalidações "passivas"
+const REALTIME_DEBOUNCE_MS = 700; // agrupa alterações em lote
+const SAFETY_POLL_MS = 5 * 60 * 1000; // rede de segurança caso o Realtime caia
 
 function loadCache(): CachedData | null {
   try {
@@ -49,7 +51,6 @@ function loadCache(): CachedData | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw) as CachedData;
     if (parsed?.version !== CACHE_VERSION) {
-      // Cache de versão antiga: descarta para não exibir dados desatualizados
       localStorage.removeItem(CACHE_KEY);
       return null;
     }
@@ -63,7 +64,7 @@ function saveCache(data: CachedData) {
   try {
     localStorage.setItem(CACHE_KEY, JSON.stringify({ ...data, version: CACHE_VERSION }));
   } catch {
-    // localStorage full or unavailable
+    // localStorage cheio ou indisponível
   }
 }
 
@@ -75,8 +76,11 @@ export function useBusSchedulesPublic() {
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [isLive, setIsLive] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const lastFetchRef = useRef(0);
+  const inFlightRef = useRef<Promise<void> | null>(null);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
 
   // Online/offline monitoring
@@ -105,17 +109,17 @@ export function useBusSchedulesPublic() {
     let allSchedules: any[] = [];
     let from = 0;
     const PAGE_SIZE = 1000;
-    
+
     while (true) {
       const { data: page, error: pageError } = await supabase
         .from('bus_schedules')
         .select('*')
         .range(from, from + PAGE_SIZE - 1)
         .order('hora');
-      
+
       if (pageError) throw pageError;
       if (!page || page.length === 0) break;
-      
+
       allSchedules = allSchedules.concat(page);
       if (page.length < PAGE_SIZE) break;
       from += PAGE_SIZE;
@@ -145,7 +149,7 @@ export function useBusSchedulesPublic() {
       });
     }
 
-    console.log(`[DEBUG] Fetched ${linesData.length} lines, ${schedulesData.length} schedules from DB`);
+    console.log(`[DATA] ${linesData.length} linhas, ${schedulesData.length} horários carregados do banco`);
 
     // Sort each direction's schedules by time
     for (const lineId of Object.keys(schedules)) {
@@ -209,12 +213,50 @@ export function useBusSchedulesPublic() {
     setLastUpdated(data.cachedAt);
   }, []);
 
-  // Initial load: cache first, then DB if online
+  /**
+   * Consulta completa ao banco (fonte da verdade) e substituição total do estado.
+   * `force` ignora o throttle — usado por Realtime e pelo botão manual.
+   */
+  const syncFromServer = useCallback(
+    async (reason: string, force = false): Promise<boolean> => {
+      if (!navigator.onLine) return false;
+      if (!force && Date.now() - lastFetchRef.current < REVALIDATE_MIN_INTERVAL_MS) return false;
+      if (inFlightRef.current) {
+        await inFlightRef.current;
+        return true;
+      }
+
+      let ok = false;
+      const run = (async () => {
+        try {
+          const fresh = await fetchFromDB();
+          if (fresh) {
+            applyData(fresh);
+            saveCache(fresh);
+            lastFetchRef.current = Date.now();
+            ok = true;
+            console.log(`[DATA] Última atualização: ${fresh.cachedAt} (motivo: ${reason})`);
+          }
+        } catch (err) {
+          console.error(`[DATA] Falha ao sincronizar (${reason}):`, err);
+          throw err;
+        } finally {
+          inFlightRef.current = null;
+        }
+      })();
+
+      inFlightRef.current = run;
+      await run;
+      return ok;
+    },
+    [fetchFromDB, applyData],
+  );
+
+  // Initial load: cache first (pintura instantânea), banco em seguida como fonte oficial
   useEffect(() => {
     const init = async () => {
       setLoading(true);
 
-      // Load cache immediately
       const cached = loadCache();
       const cacheAge = cached ? Date.now() - new Date(cached.cachedAt).getTime() : Infinity;
       const cacheIsStale = cacheAge > CACHE_MAX_AGE_MS;
@@ -222,18 +264,10 @@ export function useBusSchedulesPublic() {
         applyData(cached);
       }
 
-      // Try to fetch fresh data
       if (navigator.onLine) {
         try {
-          const fresh = await fetchFromDB();
-          if (fresh) {
-            applyData(fresh);
-            saveCache(fresh);
-            lastFetchRef.current = Date.now();
-          }
-        } catch (err) {
-          console.error('Error fetching bus data:', err);
-          // If no cache (or cache muito antigo), show error
+          await syncFromServer('carga inicial', true);
+        } catch {
           if (!cached) {
             toast.error('Erro ao carregar horários');
           } else if (cacheIsStale) {
@@ -248,29 +282,86 @@ export function useBusSchedulesPublic() {
     };
 
     init();
-  }, [fetchFromDB, applyData]);
+  }, [syncFromServer, applyData]);
 
-  // Silent revalidation (visibilitychange / online), throttled
-  const revalidate = useCallback(async () => {
-    if (!navigator.onLine) return;
-    if (Date.now() - lastFetchRef.current < REVALIDATE_MIN_INTERVAL_MS) return;
-    lastFetchRef.current = Date.now();
-    try {
-      const fresh = await fetchFromDB();
-      if (fresh) {
-        applyData(fresh);
-        saveCache(fresh);
+  // Realtime: qualquer alteração nas tabelas públicas dispara um refetch completo (com debounce)
+  useEffect(() => {
+    const scheduleRefetch = (table: string) => {
+      console.log(`[REALTIME] Alteração detectada em ${table}`);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        console.log('[REALTIME] Revalidando dados...');
+        void syncFromServer('evento realtime', true)
+          .then((ok) => {
+            if (ok) console.log('[REALTIME] Dados atualizados');
+          })
+          .catch(() => {
+            /* erro já logado */
+          });
+      }, REALTIME_DEBOUNCE_MS);
+    };
+
+    const tables = [
+      'bus_schedules',
+      'bus_lines',
+      'special_dates',
+      'special_date_line_overrides',
+    ] as const;
+
+    let disposed = false;
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+
+    const connect = () => {
+      if (disposed) return;
+      const ch = supabase.channel(`public-schedule-updates-${Math.random().toString(36).slice(2)}`);
+      for (const table of tables) {
+        ch.on('postgres_changes', { event: '*', schema: 'public', table }, () =>
+          scheduleRefetch(table),
+        );
       }
-    } catch (err) {
-      console.error('Error revalidating bus data:', err);
-    }
-  }, [fetchFromDB, applyData]);
+      ch.subscribe((status) => {
+        if (disposed) return;
+        if (status === 'SUBSCRIBED') {
+          console.log('[REALTIME] Conectado');
+          setIsLive(true);
+          // Após (re)conectar, garante que nada foi perdido durante a queda
+          void syncFromServer('reconexão realtime', true).catch(() => {});
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+          setIsLive(false);
+          console.warn(`[REALTIME] Conexão perdida (${status}). Reconectando...`);
+          if (retryTimer) clearTimeout(retryTimer);
+          retryTimer = setTimeout(() => {
+            if (disposed) return;
+            supabase.removeChannel(ch);
+            connect();
+          }, 3000);
+        }
+      });
+      channel = ch;
+    };
 
+    connect();
+
+    return () => {
+      disposed = true;
+      if (retryTimer) clearTimeout(retryTimer);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      if (channel) supabase.removeChannel(channel);
+    };
+  }, [syncFromServer]);
+
+  // Revalidação ao voltar ao primeiro plano / recuperar conexão
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === 'visible') void revalidate();
+      if (document.visibilityState === 'visible') {
+        void syncFromServer('app em primeiro plano').catch(() => {});
+      }
     };
-    const onOnline = () => void revalidate();
+    const onOnline = () => {
+      console.log('[DATA] Conexão restabelecida — buscando dados atuais');
+      void syncFromServer('voltou a ficar online', true).catch(() => {});
+    };
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onVisible);
     window.addEventListener('online', onOnline);
@@ -279,7 +370,16 @@ export function useBusSchedulesPublic() {
       window.removeEventListener('focus', onVisible);
       window.removeEventListener('online', onOnline);
     };
-  }, [revalidate]);
+  }, [syncFromServer]);
+
+  // Rede de segurança: polling leve caso o Realtime esteja indisponível
+  useEffect(() => {
+    const id = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      void syncFromServer('polling de segurança').catch(() => {});
+    }, SAFETY_POLL_MS);
+    return () => clearInterval(id);
+  }, [syncFromServer]);
 
   // Manual refresh
   const refreshData = useCallback(async () => {
@@ -290,20 +390,14 @@ export function useBusSchedulesPublic() {
 
     setIsRefreshing(true);
     try {
-      const fresh = await fetchFromDB();
-      if (fresh) {
-        applyData(fresh);
-        saveCache(fresh);
-        lastFetchRef.current = Date.now();
-        toast.success('Dados atualizados com sucesso');
-      }
-    } catch (err) {
-      console.error('Error refreshing:', err);
+      const ok = await syncFromServer('atualização manual', true);
+      if (ok) toast.success('Dados atualizados com sucesso');
+    } catch {
       toast.error('Erro ao atualizar dados');
     } finally {
       setIsRefreshing(false);
     }
-  }, [fetchFromDB, applyData]);
+  }, [syncFromServer]);
 
 
   return {
@@ -313,6 +407,7 @@ export function useBusSchedulesPublic() {
     loading,
     isRefreshing,
     isOnline,
+    isLive,
     lastUpdated,
     refreshData,
   };
