@@ -79,7 +79,9 @@ export function useVehiclePosition(
     };
 
     fetchPosition();
-    intervalId = window.setInterval(fetchPosition, POLL_INTERVAL_MS);
+    intervalId = window.setInterval(() => {
+      if (document.visibilityState === "visible") fetchPosition();
+    }, POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;

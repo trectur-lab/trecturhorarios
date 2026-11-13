@@ -43,7 +43,7 @@ const CACHE_VERSION = 4;
 const CACHE_MAX_AGE_MS = 10 * 60 * 1000; // cache é apenas fallback offline
 const REVALIDATE_MIN_INTERVAL_MS = 15 * 1000; // throttle só para revalidações "passivas"
 const REALTIME_DEBOUNCE_MS = 700; // agrupa alterações em lote
-const SAFETY_POLL_MS = 5 * 60 * 1000; // rede de segurança caso o Realtime caia
+const SAFETY_POLL_MS = 15 * 60 * 1000; // rede de segurança caso o Realtime caia
 
 function loadCache(): CachedData | null {
   try {

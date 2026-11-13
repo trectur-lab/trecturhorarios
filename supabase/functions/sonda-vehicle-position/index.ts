@@ -27,7 +27,17 @@ interface SondaCreds {
   senha: string;
 }
 
+let credsCache: { value: SondaCreds; expiresAt: number } | null = null;
+const CREDS_TTL_MS = 5 * 60 * 1000;
+
 async function getCreds(): Promise<SondaCreds | null> {
+  if (credsCache && credsCache.expiresAt > Date.now()) return credsCache.value;
+  const fresh = await readCreds();
+  if (fresh) credsCache = { value: fresh, expiresAt: Date.now() + CREDS_TTL_MS };
+  return fresh;
+}
+
+async function readCreds(): Promise<SondaCreds | null> {
   const supabase = createClient(
     Deno.env.get("SUPABASE_URL")!,
     Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,

@@ -155,10 +155,18 @@ export function useLineVehicles(
     };
 
     run();
-    const id = window.setInterval(run, POLL_INTERVAL_MS);
+    // Não consulta enquanto o app está em segundo plano (economia de recursos)
+    const id = window.setInterval(() => {
+      if (document.visibilityState === "visible") run();
+    }, POLL_INTERVAL_MS);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") run();
+    };
+    document.addEventListener("visibilitychange", onVisible);
     return () => {
       cancelRef.current = true;
       window.clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisible);
     };
   }, [numeroLinha, tick]);
 
